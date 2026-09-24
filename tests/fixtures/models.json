@@ -1,6 +1,12 @@
 {
   "data": [
     { "id": "openai/gpt-6-sol" },
-    { "id": "~deepseek/deepseek-flash-latest", "alias_target": { "name": "DeepSeek: DeepSeek V4.1 Flash", "slug": "deepseek/deepseek-v4.1-flash" } }
+    {
+      "id": "~deepseek/deepseek-flash-latest",
+      "alias_target": {
+        "name": "DeepSeek: DeepSeek V4.1 Flash",
+        "slug": "deepseek/deepseek-v4.1-flash"
+      }
+    }
   ]
 }

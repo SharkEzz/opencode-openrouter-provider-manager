@@ -1,0 +1,24 @@
+{
+  "$schema": "./node_modules/oxlint/configuration_schema.json",
+  "ignorePatterns": ["node_modules", "plans"],
+  "env": {
+    "builtin": true,
+    "node": true
+  },
+  "options": {
+    "reportUnusedDisableDirectives": "warn",
+    "typeAware": true
+  },
+  "plugins": ["oxc", "typescript", "node"],
+  "categories": {
+    "correctness": "error",
+    "perf": "warn",
+    "suspicious": "warn"
+  },
+  "overrides": [
+    {
+      "files": ["tests/**/*"],
+      "plugins": ["vitest"]
+    }
+  ]
+}

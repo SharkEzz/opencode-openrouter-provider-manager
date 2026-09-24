@@ -2,18 +2,28 @@
   "name": "openrouter-provider-manager",
   "version": "0.1.0",
   "private": true,
+  "description": "OpenCode V2 plugin: pin a specific OpenRouter endpoint (e.g. openai/flex) per model",
+  "license": "MIT",
+  "author": {
+    "name": "SharkEzz",
+    "email": "icraft640@gmail.com",
+    "url": "https://tristandida.fr"
+  },
   "type": "module",
   "exports": {
     ".": "./index.ts",
     "./tui": "./tui.tsx",
     "./rpc": "./rpc.ts"
   },
-  "description": "OpenCode V2 plugin: pin a specific OpenRouter endpoint (e.g. openai/flex) per model",
   "scripts": {
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage"
+    "test:coverage": "vitest run --coverage",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "lint": "oxlint --write",
+    "lint:check": "oxlint"
   },
   "devDependencies": {
     "@opencode/plugin": "^2.0.16",
@@ -22,13 +32,17 @@
     "@opentui/solid": "^0.5.12",
     "@types/node": "^26.6.2",
     "@vitest/coverage-v8": "^5.0.1",
+    "oxfmt": "^0.70.0",
+    "oxlint": "^1.85.0",
+    "oxlint-tsgolint": "^7.0.2002",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
   },
   "peerDependencies": {
-    "solid-js": "^1.9.12"
+    "solid-js": "1.9.12"
   },
   "allowScripts": {
-    "msgpackr-extract@3.0.4": true
+    "msgpackr-extract@3.0.4": true,
+    "fsevents@2.3.3": true
   }
 }
