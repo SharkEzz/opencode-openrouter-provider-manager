@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest"
-import { resolveModel } from "../src/model"
+import { resolveModel } from "../src/model.ts"
 
 const sol = { providerID: "openrouter", id: "openai/gpt-6-sol", variant: "low" }
 const luna = { providerID: "openrouter", id: "openai/gpt-6-luna", variant: "high" }

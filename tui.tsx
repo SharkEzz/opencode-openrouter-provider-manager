@@ -1,15 +1,27 @@
 import { Plugin } from "@opencode/plugin/tui"
 import { watch } from "node:fs"
 import path from "node:path"
-import { createEffect, createSignal, onCleanup, Show } from "solid-js"
-import { type Choice, type Endpoint, OpenRouterProviders } from "./rpc"
-import { degraded, price, summary, tokens } from "./src/format"
-import { AUTO, resolveQuery } from "./src/match"
-import { resolveModel } from "./src/model"
-import { MODEL_STATE_FILE, type ModelRef, pickedModel } from "./src/tui-state"
+import { createEffect, Show } from "solid-js"
+import { type Choice, type Endpoint, OpenRouterProviders } from "./rpc.ts"
+import { degraded, price, summary, tokens } from "./src/format.ts"
+import { resolveModel } from "./src/model.ts"
+import { MODEL_STATE_FILE, type ModelRef, pickedModel } from "./src/tui-state.ts"
+import type { DialogSelectOption } from "@opencode/plugin/tui/context"
 
 const PROVIDER = "openrouter"
 const COMMAND = "openrouter.provider"
+const AUTO = "__auto__"
+
+type Theme = Plugin.Context["theme"]
+type Color = Theme["text"]["base"]
+type ColoredOption = DialogSelectOption<string> & { footerColor?: Color }
+
+/** Flex and priority endpoints stand out; default ones use the surrounding color. */
+function tierColor(theme: Theme, tier: Endpoint["tier"]): Color | undefined {
+  if (tier === "flex") return theme.text.feedback.success.base
+  if (tier === "priority") return theme.text.feedback.warning.base
+  return undefined
+}
 const HOME = "__home__"
 
 export default Plugin.define({
@@ -78,11 +90,13 @@ export default Plugin.define({
       return info?.providerID && info.id ? { providerID: info.providerID, id: info.id } : undefined
     }
 
-    function option(endpoint: Endpoint, model: ModelRef) {
+    function option(endpoint: Endpoint, model: ModelRef): ColoredOption {
+
       const warnings = [
-        degraded(endpoint) ? "dégradé" : "",
-        model.variant && !endpoint.reasoning ? `ignore l'effort « ${model.variant} »` : "",
+        degraded(endpoint) ? "degraded" : "",
+        model.variant && !endpoint.reasoning ? `ignores "${model.variant}" effort` : "",
       ].filter(Boolean)
+      const footerColor = tierColor(ctx.theme, endpoint.tier);
       return {
         title: endpoint.provider,
         value: endpoint.tag,
@@ -96,18 +110,20 @@ export default Plugin.define({
           .filter(Boolean)
           .join(" · "),
         footer: endpoint.tag,
+        // Undocumented: OpenCode's list reads `footerColor` (not in DialogSelectOption). If a
+        // future version drops it, the tag simply renders uncolored.
+        ...(footerColor ? { footerColor } : undefined)
       }
     }
 
     const dialogTitle = (model: ModelRef) => `Endpoint OpenRouter · ${model.id}${model.variant ? ` #${model.variant}` : ""}`
 
-    /** `query` is the optional argument of `/provider`: a tag, a tag prefix or provider name, or "auto". */
-    async function pick(query?: string) {
+    async function pick() {
       const model = await activeModel()
       if (!model || model.providerID !== PROVIDER) {
         ctx.ui.toast.show({
           title: "OpenRouter",
-          message: model ? `${model.providerID}/${model.id} n'est pas un modèle OpenRouter.` : "Aucun modèle actif.",
+          message: model ? `${model.providerID}/${model.id} is not an OpenRouter model.` : "No active model.",
           variant: "warning",
         })
         return
@@ -140,44 +156,17 @@ export default Plugin.define({
       }
 
       const current = stored.choice?.tag ?? AUTO
-      let candidates: readonly Endpoint[] = listed.endpoints
-      if (query?.trim()) {
-        const result = resolveQuery(query, listed.endpoints)
-        if (result.kind === "direct") {
-          ctx.ui.dialog.clear()
-          if (result.value !== current) await apply(model, result.value, listed.endpoints)
-          else ctx.ui.toast.show({ title: "OpenRouter", message: `${model.id} utilise déjà ${result.value === AUTO ? "le routage automatique" : result.value}.`, variant: "info" })
-          return
-        }
-        if (result.kind === "none") {
-          ctx.ui.dialog.clear()
-          const tags = listed.endpoints.map((e) => e.tag)
-          ctx.ui.toast.show({
-            title: "OpenRouter",
-            message: `Aucun endpoint « ${query.trim()} » pour ${model.id}. Disponibles : auto, ${tags.slice(0, 8).join(", ")}${tags.length > 8 ? "…" : ""}`,
-            variant: "error",
-          })
-          return
-        }
-        candidates = result.candidates
-      }
-
       const selection = ctx.ui.dialog.select<string>({
         title: dialogTitle(model),
-        placeholder: "Filtrer les providers…",
+        placeholder: "Filter providers…",
         current,
         options: [
-          // An ambiguous argument narrows the list to its matches.
-          ...(candidates !== listed.endpoints
-            ? []
-            : [
-                {
-                  title: "Auto",
-                  value: AUTO,
-                  description: "Routage OpenRouter par défaut (prix, disponibilité, fallbacks)",
-                },
-              ]),
-          ...candidates.map((endpoint) => option(endpoint, model)),
+          {
+            title: "Auto",
+            value: AUTO,
+            description: "Default OpenRouter routing (price, availability, fallbacks)",
+          },
+          ...listed.endpoints.map((endpoint) => option(endpoint, model)),
         ],
       })
       // Prices and warnings don't fit the default width.
@@ -196,7 +185,7 @@ export default Plugin.define({
       updateChoices((draft) => void (draft[model.id] = choice))
       ctx.ui.toast.show({
         title: "OpenRouter",
-        message: choice ? `${model.id} → ${summary(choice)} (strict)` : `${model.id} → routage automatique`,
+        message: choice ? `${model.id} → ${summary(choice)} (strict)` : `${model.id} → automatic routing`,
         variant: "success",
       })
     }
@@ -207,9 +196,9 @@ export default Plugin.define({
     rpc
       .debug({ enabled: debug })
       .then(({ log }) => {
-        if (debug) ctx.ui.toast.show({ title: "OpenRouter", message: `Log des requêtes actif : ${log}`, variant: "info" })
+        if (debug) ctx.ui.toast.show({ title: "OpenRouter", message: `Request log enabled: ${log}`, variant: "info" })
       })
-      .catch(() => {})
+      .catch(() => { })
 
     // keymap.layer needs the host's Keymap provider, which only exists inside the rendered
     // tree: register it from an invisible component mounted in the `app` slot.
@@ -221,13 +210,13 @@ export default Plugin.define({
           commands: [
             {
               id: COMMAND,
-              title: "OpenRouter : choisir l'endpoint",
-              description: "Épingle un provider OpenRouter pour le modèle actif",
+              title: "OpenRouter: choose endpoint",
+              description: "Pin an OpenRouter provider for the active model",
               group: "OpenRouter",
               bind: "<leader>o",
               palette: true,
-              slash: { name: "provider", arguments: true },
-              run: (input) => pick(input),
+              slash: { name: "provider" },
+              run: () => pick(),
             },
           ],
           bindings: [COMMAND],
@@ -255,7 +244,7 @@ export default Plugin.define({
       if (!choice) return
       ctx.ui.toast.show({
         title: "OpenRouter",
-        message: `Échec avec l'endpoint épinglé ${choice.tag}. /provider pour en changer ou repasser en Auto.`,
+        message: `Request failed on pinned endpoint ${choice.tag}. Use /provider to switch or go back to Auto.`,
         variant: "error",
         sessionID: event.data.sessionID,
       })
@@ -289,11 +278,10 @@ function SidebarSection(props: {
     return id ? props.choices[id] : undefined
   }
   const color = () => {
-    const tier = choice()?.tier
+    const pinned = choice()
     const theme = props.ctx.theme
-    if (tier === "flex") return theme.text.feedback.success.base
-    if (tier === "priority") return theme.text.feedback.warning.base
-    return choice() ? theme.text.base : theme.text.muted
+    if (!pinned) return theme.text.muted
+    return tierColor(theme, pinned.tier) ?? theme.text.base
   }
   // Mirrors the built-in Context section: bold title, then muted detail lines.
   return (
@@ -302,8 +290,8 @@ function SidebarSection(props: {
         <text fg={props.ctx.theme.text.base}>
           <b>OpenRouter</b>
         </text>
-        <Show when={choice()} fallback={<text fg={color()}>Auto (routage OpenRouter)</text>}>
-          {(pinned) => (
+        <Show when={choice()} fallback={<text fg={color()}>Auto (OpenRouter routing)</text>}>
+          {(pinned: () => Choice) => (
             <>
               <text fg={color()}>{pinned().tag}</text>
               <text fg={props.ctx.theme.text.muted}>
@@ -317,18 +305,16 @@ function SidebarSection(props: {
   )
 }
 
-const SPINNER = ["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"]
-
 function Loading(props: { ctx: Plugin.Context; title: string }) {
-  const [frame, setFrame] = createSignal(0)
-  const timer = setInterval(() => setFrame((f) => (f + 1) % SPINNER.length), 80)
-  onCleanup(() => clearInterval(timer))
   return (
     <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
       <text fg={props.ctx.theme.text.base}>
         <b>{props.title}</b>
       </text>
-      <text fg={props.ctx.theme.text.muted}>{SPINNER[frame()]} Chargement des endpoints…</text>
+      <box flexDirection="row" gap={1}>
+        <spinner interval={80} color={props.ctx.theme.text.muted} />
+        <text fg={props.ctx.theme.text.muted}>Loading endpoints…</text>
+      </box>
     </box>
   )
 }

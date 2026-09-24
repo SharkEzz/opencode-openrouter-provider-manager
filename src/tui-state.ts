@@ -2,7 +2,7 @@ import { readFileSync, statSync } from "node:fs"
 import { homedir } from "node:os"
 import path from "node:path"
 
-export type ModelRef = { providerID: string; id: string; variant?: string }
+export type ModelRef = { providerID: string; id: string; variant?: string | undefined }
 
 // The TUI's own model picker persists its selection here. This is internal, undocumented
 // state, read only because plugins cannot see the live selection yet

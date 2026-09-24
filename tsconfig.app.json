@@ -1,0 +1,12 @@
+{
+	"extends": "./tsconfig.base.json",
+	"compilerOptions": {
+		"tsBuildInfoFile": "./node_modules/app.tsbuildInfo"
+	},
+	"include": [
+		"index.ts",
+		"rpc.ts",
+		"src/**/*.ts",
+		"tui.tsx",
+	]
+}

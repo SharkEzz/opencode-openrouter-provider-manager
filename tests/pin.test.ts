@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest"
-import { pinProvider } from "../src/pin"
+import { pinProvider } from "../src/pin.ts"
 
 describe("pinProvider", () => {
   it("adds a strict provider preference", () => {

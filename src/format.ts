@@ -1,4 +1,4 @@
-import type { Choice, Endpoint } from "../rpc"
+import type { Choice, Endpoint } from "../rpc.ts"
 
 export function price(value: number | null) {
   if (value === null) return "?"

@@ -1,8 +1,8 @@
 import { Plugin } from "@opencode/plugin"
-import { Choice, OpenRouterProviders } from "./rpc"
-import { DEBUG_LOG, logRequest } from "./src/debug"
-import { fetchEndpoints } from "./src/openrouter"
-import { pinProvider } from "./src/pin"
+import { Choice, OpenRouterProviders } from "./rpc.ts"
+import { DEBUG_LOG, logRequest } from "./src/debug.ts"
+import { fetchEndpoints } from "./src/openrouter.ts"
+import { pinProvider } from "./src/pin.ts"
 
 const PROVIDER = "openrouter"
 
@@ -67,7 +67,7 @@ export default Plugin.define({
         }
         // Logged after the rewrite: this is exactly what leaves for OpenRouter.
         if (debug) {
-          await logRequest({ kind: event.kind, model: event.model.id, sessionID: event.sessionID, body: sent }).catch(() => {})
+          await logRequest({ kind: event.kind, model: event.model.id, sessionID: event.sessionID, body: sent }).catch(() => { })
         }
       },
       { providerID: PROVIDER },

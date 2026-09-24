@@ -1,4 +1,4 @@
-import type { ModelRef } from "./tui-state"
+import type { ModelRef } from "./tui-state.ts"
 
 /**
  * The model the TUI is showing. A pick made in the model picker only applies to the screen

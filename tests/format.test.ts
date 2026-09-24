@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
-import type { Endpoint } from "../rpc"
-import { degraded, price, summary, tokens } from "../src/format"
+import type { Endpoint } from "../rpc.ts"
+import { degraded, price, summary, tokens } from "../src/format.ts"
 
 const endpoint = (overrides: Partial<Endpoint> = {}): Endpoint => ({
   tag: "openai",

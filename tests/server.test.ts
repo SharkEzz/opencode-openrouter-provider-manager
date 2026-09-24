@@ -1,9 +1,9 @@
 import { readFileSync, rmSync } from "node:fs"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import plugin from "../index"
-import sol from "./fixtures/gpt-6-sol.endpoints.json"
-import { DEBUG_LOG } from "../src/debug"
-import { clearEndpointCache } from "../src/openrouter"
+import plugin from "../index.ts"
+import sol from "./fixtures/gpt-6-sol.endpoints.json" with { type: "json" }
+import { DEBUG_LOG } from "../src/debug.ts"
+import { clearEndpointCache } from "../src/openrouter.ts"
 
 type Credential = { type: "key"; key: string } | { type: "oauth"; access: string }
 type HookEvent = {
@@ -21,7 +21,7 @@ const signal = new AbortController().signal
 async function start(credential?: Credential) {
   const storage = new Map<string, unknown>()
   const handlers: Record<string, (input: unknown, context: unknown) => Promise<any>> = {}
-  const emit = vi.fn(async () => {})
+  const emit = vi.fn(async () => { })
   let hook: { name: string; callback: (event: HookEvent) => Promise<void>; options: unknown } | undefined
 
   const ctx = {
@@ -33,13 +33,13 @@ async function start(credential?: Credential) {
     rpc: {
       register: async (_definition: unknown, registered: typeof handlers) => {
         Object.assign(handlers, registered)
-        return { dispose: async () => {}, events: { emit } }
+        return { dispose: async () => { }, events: { emit } }
       },
     },
     session: {
       hook: async (name: string, callback: (event: HookEvent) => Promise<void>, options: unknown) => {
         hook = { name, callback, options }
-        return { dispose: async () => {} }
+        return { dispose: async () => { } }
       },
     },
     integration: {
@@ -136,7 +136,8 @@ describe("http.request hook", () => {
     storage.set(`choice/${encodeURIComponent("openai/gpt-6-sol")}`, { ...CHOICE, tag: "azure", tier: "default" })
 
     const sent = await send(chatRequest({}))
-    expect((await sent.json()).provider.only).toEqual(["azure"])
+    const result = await sent.json();
+    expect((result as any).provider.only).toEqual(["azure"])
   })
 
   it("logs what is actually sent when debug is on", async () => {

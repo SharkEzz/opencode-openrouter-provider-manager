@@ -6,12 +6,11 @@
   "exports": {
     ".": "./index.ts",
     "./tui": "./tui.tsx",
-    "./rpc": "./rpc.ts",
-    "./package.json": "./package.json"
+    "./rpc": "./rpc.ts"
   },
   "description": "OpenCode V2 plugin: pin a specific OpenRouter endpoint (e.g. openai/flex) per model",
   "scripts": {
-    "typecheck": "tsc -p tsconfig.json",
+    "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"

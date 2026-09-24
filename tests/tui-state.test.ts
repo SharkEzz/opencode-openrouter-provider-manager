@@ -1,7 +1,7 @@
 import { mkdirSync, rmSync, writeFileSync } from "node:fs"
 import path from "node:path"
 import { afterEach, describe, expect, it } from "vitest"
-import { MODEL_STATE_FILE, pickedModel } from "../src/tui-state"
+import { MODEL_STATE_FILE, pickedModel } from "../src/tui-state.ts"
 
 function writeState(content: unknown) {
   mkdirSync(path.dirname(MODEL_STATE_FILE), { recursive: true })

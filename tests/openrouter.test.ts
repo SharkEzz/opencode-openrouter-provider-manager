@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
-import alias from "./fixtures/alias.endpoints.json"
-import deepseek from "./fixtures/deepseek.endpoints.json"
-import sol from "./fixtures/gpt-6-sol.endpoints.json"
-import models from "./fixtures/models.json"
-import { clearEndpointCache, fetchEndpoints, normalize, perMillion, tierOf } from "../src/openrouter"
+import alias from "./fixtures/alias.endpoints.json" with { type: "json" }
+import deepseek from "./fixtures/deepseek.endpoints.json" with { type: "json" }
+import sol from "./fixtures/gpt-6-sol.endpoints.json" with { type: "json" }
+import models from "./fixtures/models.json" with { type: "json" }
+import { clearEndpointCache, fetchEndpoints, normalize, perMillion, tierOf } from "../src/openrouter.ts"
 
 const API = "https://openrouter.ai/api/v1"
 

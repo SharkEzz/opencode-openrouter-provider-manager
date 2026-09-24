@@ -1,4 +1,4 @@
-import type { Endpoint, Tier } from "../rpc"
+import type { Endpoint, Tier } from "../rpc.ts"
 
 const API = "https://openrouter.ai/api/v1"
 const TTL = 10 * 60 * 1000
@@ -53,7 +53,7 @@ export function normalize(raw: RawEndpoint): Endpoint | undefined {
 }
 
 async function get<T>(url: string, apiKey: string | undefined, signal?: AbortSignal): Promise<T> {
-  const response = await fetch(url, { headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}, signal })
+  const response = await fetch(url, { headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {}, ...(signal ? { signal } : undefined) })
   if (!response.ok) {
     const detail = await response.text().catch(() => "")
     throw new Error(`OpenRouter ${response.status} (${url.slice(API.length)})${detail ? `: ${detail.slice(0, 200)}` : ""}`)
