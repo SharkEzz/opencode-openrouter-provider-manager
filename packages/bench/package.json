@@ -3,7 +3,14 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "exports": {
+    "./schema": "./schema.ts",
+    "./profiles": "./profiles.ts",
+    "./results/*": "./results/*",
+    "./observed/*": "./observed/*"
+  },
   "scripts": {
+    "bench:fake": "node fake-summary.ts",
     "bench:observe": "node observe.ts",
     "typecheck": "tsc --noEmit",
     "test": "vitest run"

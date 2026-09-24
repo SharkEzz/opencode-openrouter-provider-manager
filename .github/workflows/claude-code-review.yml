@@ -1,8 +1,10 @@
 name: Claude Code Review
 
+# Manual only, to save tokens: add the `claude-review` label to a pull request to run a review.
+# Re-apply the label to review again after new pushes.
 on:
   pull_request:
-    types: [opened, synchronize, ready_for_review, reopened]
+    types: [labeled]
     # Optional: Only run on specific file changes
     # paths:
     #   - "src/**/*.ts"
@@ -12,6 +14,7 @@ on:
 
 jobs:
   claude-review:
+    if: github.event.label.name == 'claude-review'
     # Optional: Filter by PR author
     # if: |
     #   github.event.pull_request.user.login == 'external-contributor' ||

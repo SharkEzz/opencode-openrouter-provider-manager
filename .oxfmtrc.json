@@ -4,7 +4,13 @@
   "bracketSameLine": true,
   "bracketSpacing": true,
   "endOfLine": "lf",
-  "ignorePatterns": ["node_modules", "plans", "packages/design-system"],
+  "ignorePatterns": [
+    "node_modules",
+    "plans",
+    "packages/design-system",
+    "packages/bench/observed",
+    "packages/bench/results"
+  ],
   "insertFinalNewline": true,
   "jsxSingleQuote": false,
   "objectWrap": "preserve",
