@@ -79,20 +79,20 @@ Les niveaux `low`, `medium` et `high` forment une dimension testée. Pour tenir 
 
 Chaque requête est envoyée en streaming SSE avec `usage: { include: true }` et chronométrée avec `performance.now()`.
 
-| Champ              | Définition                                                                                          |
-| ------------------ | --------------------------------------------------------------------------------------------------- |
-| `ttftMs`           | délai jusqu'au premier delta, raisonnement compris                                                  |
-| `ttfvtMs`          | délai jusqu'au premier token de contenu visible                                                     |
-| `totalMs`          | délai jusqu'à la fin du flux                                                                        |
-| `outputTps`        | `completionTokens / (tEnd - tFirst)`                                                                |
-| `promptTokens`     | issu de `usage`                                                                                     |
-| `completionTokens` | issu de `usage`                                                                                     |
-| `reasoningTokens`  | issu de `usage.completion_tokens_details`                                                           |
-| `cachedTokens`     | issu de `usage.prompt_tokens_details`                                                               |
-| `costUsd`          | issu de `usage.cost`                                                                                |
-| `providerUsed`     | hébergeur réel, lu via `GET /api/v1/generation?id=` (indispensable pour Auto)                       |
-| `serverLatencyMs`  | `latency` et `generation_time` de `/generation`, pour recouper les mesures locales                  |
-| `status`           | `ok`, `http_4xx`, `http_429`, `http_5xx`, `timeout` ou `stream_error`, avec code et message tronqué |
+| Champ              | Définition                                                                                                                            |
+| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
+| `ttftMs`           | délai jusqu'au premier delta portant du texte (raisonnement ou contenu non vide) ; les deltas vides ou limités au `role` sont ignorés |
+| `ttfvtMs`          | délai jusqu'au premier token de contenu visible                                                                                       |
+| `totalMs`          | délai jusqu'à la fin du flux                                                                                                          |
+| `outputTps`        | `completionTokens * 1000 / (tEnd - tFirst)` en tokens/s (`tFirst` = instant du `ttftMs`, horodatages `performance.now()` en ms)       |
+| `promptTokens`     | issu de `usage`                                                                                                                       |
+| `completionTokens` | issu de `usage`                                                                                                                       |
+| `reasoningTokens`  | issu de `usage.completion_tokens_details`                                                                                             |
+| `cachedTokens`     | issu de `usage.prompt_tokens_details`                                                                                                 |
+| `costUsd`          | issu de `usage.cost`                                                                                                                  |
+| `providerUsed`     | hébergeur réel, lu via `GET /api/v1/generation?id=` (indispensable pour Auto)                                                         |
+| `serverLatencyMs`  | `latency` et `generation_time` de `/generation`, pour recouper les mesures locales                                                    |
+| `status`           | `ok`, `http_4xx`, `http_429`, `http_5xx`, `timeout` ou `stream_error`, avec code et message tronqué                                   |
 
 Chaque requête porte aussi ses métadonnées : `runId`, `model`, `config`, `tag`, `effort`, `workload`, `iteration`, `startedAt`.
 
@@ -105,7 +105,7 @@ Pour `agentic`, les métriques sont aussi agrégées par tâche : somme des coû
 - **Concurrence** : 1 par défaut, pour ne pas biaiser le TTFT. Elle est configurable.
 - **Budget inférieur à 5 $** :
   - `--dry-run` estime le coût de chaque cellule à partir des prix de `/endpoints` et des tokens attendus par workload, sans faire d'appel payant ;
-  - pendant le run, un cumul de `costUsd` arrête l'exécution dès que `--max-usd` est atteint (5 par défaut).
+  - pendant le run, `--max-usd` (5 par défaut) est un plafond strict grâce à une **réservation avant envoi**. Avant chaque requête, le runner réserve son coût maximal : tokens d'entrée × prix d'entrée, plus `max_tokens` × prix de sortie, au tarif le plus cher de la config (pour `auto`, l'endpoint le plus cher du modèle). Il n'envoie la requête que si le coût dépensé, plus les réservations des requêtes en cours, plus cette nouvelle réservation reste sous le plafond. À la fin de la requête, la réservation est remplacée par le `costUsd` réel. Pour `agentic`, la réservation couvre la tâche entière (8 tours × pire cas par tour).
 - **Matrice réduite** : la matrice complète (2 modèles × 5 configs × 3 efforts × 4 workloads × n=20) dépasse largement le budget. On retient donc :
   - les 3 niveaux de reasoning seulement pour `short` et `long` ;
   - `agentic` et `big-context` en `medium` seulement ;
@@ -120,7 +120,7 @@ Pour `agentic`, les métriques sont aussi agrégées par tâche : somme des coû
 
 Une cellule correspond à un couple modèle × workload × effort × config. Pour chacune, on calcule :
 
-- la médiane, le p90 et le p95 de `ttftMs`, `totalMs`, `outputTps` et `costUsd`, plus le coût par tâche pour `agentic` ;
+- la médiane, le p90 et le p95 de `ttftMs`, `totalMs`, `outputTps` et `costUsd`, plus le coût par tâche pour `agentic`. Ces statistiques portent sur les requêtes réussies uniquement. `n` compte les tentatives et `ok` les succès. Une cellule sans aucun succès (par exemple un endpoint épinglé indisponible) a des statistiques `null` et n'apparaît que via son taux de succès et ses erreurs ;
 - un **IC 95 % de la médiane** par bootstrap : 1 000 rééchantillonnages, avec une seed fixe ;
 - le **ratio par rapport à `auto`**, avec son IC par bootstrap sur le ratio des médianes. Un chiffre n'est mis en avant (`headlines`) que si son IC exclut 1 ;
 - la **prévisibilité** : coefficient de variation, IQR, ratio p95/p50, taux de succès ;
@@ -155,7 +155,7 @@ type Headline = {
   baseline: number; // valeur Auto
   ratio: number;
   ci: [number, number];
-  n: number;
+  n: number; // succès de la config épinglée ayant servi au calcul
 };
 
 type Stat = { p50: number; p90: number; p95: number; ci50: [number, number] };
@@ -166,14 +166,20 @@ type Cell = {
   effort: string;
   config: string;
   tag: string | null; // null pour auto
-  n: number;
-  successRate: number;
-  ttftMs: Stat;
-  totalMs: Stat;
-  outputTps: Stat;
-  costUsd: Stat;
-  cv: { ttftMs: number; totalMs: number };
-  vsAuto?: { ttft: number; cost: number; ci: { ttft: [number, number]; cost: [number, number] } };
+  n: number; // tentatives (hors warm-up)
+  ok: number; // succès ; les stats ci-dessous portent uniquement sur eux
+  successRate: number; // ok / n
+  // null quand ok === 0 : aucune valeur n'est inventée
+  ttftMs: Stat | null;
+  totalMs: Stat | null;
+  outputTps: Stat | null;
+  costUsd: Stat | null;
+  cv: { ttftMs: number; totalMs: number } | null;
+  vsAuto?: {
+    ttft: number;
+    cost: number;
+    ci: { ttft: [number, number]; cost: [number, number] };
+  } | null; // null si la config ou auto n'a aucun succès
   cacheRatio?: number;
   coldVsCached?: { coldUsd: number; cachedUsd: number };
   providers?: Record<string, number>; // auto uniquement : part par hébergeur
