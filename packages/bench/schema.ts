@@ -12,7 +12,6 @@ export const ObservedRow = z.strictObject({
   /** Hosting provider as OpenRouter names it, e.g. "DeepInfra". */
   provider: z.string(),
   requests: z.number().int().nonnegative(),
-  usageUsd: z.number().nonnegative(),
   promptTokens: z.number().int().nonnegative(),
   cachedTokens: z.number().int().nonnegative(),
   completionTokens: z.number().int().nonnegative(),

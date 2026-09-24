@@ -3,6 +3,7 @@
  * aggregates from `POST /analytics/query`, written to `observed/<to>.json`.
  *
  *   OPENROUTER_MANAGEMENT_KEY=… node observe.ts [--days 30] [--app OpenCode | --app-id 123]
+ *                                               [--exclude <model slug>]…
  *
  * Analytics needs a management key (an inference key gets 403). Resolving the app id by name
  * also needs `OPENROUTER_API_KEY`, because only `/generation` maps a generation to its app.
@@ -21,7 +22,6 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 // `cache_capture_rate` and `possible_*` can't be combined with cost, latency or the app filter.
 const METRICS = [
   'request_count',
-  'total_usage',
   'tokens_prompt',
   'cached_tokens',
   'tokens_completion',
@@ -70,7 +70,6 @@ const AnalyticsRow = z.object({
   model: z.string(),
   provider: z.string().nullish(),
   request_count: Num,
-  total_usage: Num,
   tokens_prompt: Num,
   cached_tokens: OptionalNum,
   tokens_completion: Num,
@@ -93,32 +92,39 @@ export function baseSlug(permaslug: string) {
   return permaslug.replace(/-\d{8}$/, '');
 }
 
+/** Rounds a latency to the ms, a throughput to 0.1 tok/s and a rate to 4 decimals. */
+function round(value: number | null, decimals: number) {
+  if (value === null) return null;
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
 /**
  * Maps analytics rows to the whitelisted `ObservedRow` fields. Rows without a provider are
- * dropped: they can't be pinned, so they say nothing about choosing an endpoint.
+ * dropped: they can't be pinned, so they say nothing about choosing an endpoint. `exclude`
+ * holds model slugs (with or without date) to leave out of a published export.
  */
-export function toRows(json: unknown): ObservedRow[] {
+export function toRows(json: unknown, exclude: ReadonlySet<string> = new Set()): ObservedRow[] {
   const { data } = AnalyticsResponse.parse(json);
   if (data.metadata.truncated)
     throw new Error(`Analytics returned more than ${ROW_LIMIT} rows; shorten --days`);
   return data.data.flatMap((raw) => {
     const row = AnalyticsRow.parse(raw);
-    if (!row.provider) return [];
+    if (!row.provider || exclude.has(row.model) || exclude.has(baseSlug(row.model))) return [];
     return [
       {
         model: baseSlug(row.model),
         permaslug: row.model,
         provider: row.provider,
         requests: row.request_count,
-        usageUsd: row.total_usage,
         promptTokens: row.tokens_prompt,
         cachedTokens: row.cached_tokens ?? 0,
         completionTokens: row.tokens_completion,
         reasoningTokens: row.reasoning_tokens ?? 0,
-        ttftP50Ms: row.p50_total_time_to_first_token,
-        ttftP95Ms: row.p95_total_time_to_first_token,
-        tpsP50: row.p50_throughput,
-        cacheHitRate: row.cache_hit_rate,
+        ttftP50Ms: round(row.p50_total_time_to_first_token, 0),
+        ttftP95Ms: round(row.p95_total_time_to_first_token, 0),
+        tpsP50: round(row.p50_throughput, 1),
+        cacheHitRate: round(row.cache_hit_rate, 4),
       },
     ];
   });
@@ -175,9 +181,14 @@ export async function exportObserved(
   managementKey: string,
   fetchImpl: Fetch = fetch,
   now = new Date(),
+  exclude: ReadonlySet<string> = new Set(),
 ): Promise<Observed> {
   const json = await post('/analytics/query', buildQuery(appId, range), managementKey, fetchImpl);
-  return Observed.parse({ period: range, exportedAt: now.toISOString(), rows: toRows(json) });
+  return Observed.parse({
+    period: range,
+    exportedAt: now.toISOString(),
+    rows: toRows(json, exclude),
+  });
 }
 
 async function post(route: string, body: unknown, key: string, fetchImpl: Fetch) {
@@ -208,6 +219,7 @@ async function main() {
       days: { type: 'string', default: '30' },
       app: { type: 'string', default: 'OpenCode' },
       'app-id': { type: 'string' },
+      exclude: { type: 'string', multiple: true, default: [] },
     },
   });
   const management = process.env.OPENROUTER_MANAGEMENT_KEY;
@@ -220,7 +232,14 @@ async function main() {
     : await resolveAppId(values.app, { management, api: process.env.OPENROUTER_API_KEY });
   if (!Number.isInteger(appId)) throw new Error('--app-id must be an integer');
 
-  const observed = await exportObserved(appId, range, management);
+  const observed = await exportObserved(
+    appId,
+    range,
+    management,
+    fetch,
+    new Date(),
+    new Set(values.exclude),
+  );
   const dir = path.join(import.meta.dirname, 'observed');
   mkdirSync(dir, { recursive: true });
   const file = path.join(dir, `${range.to}.json`);

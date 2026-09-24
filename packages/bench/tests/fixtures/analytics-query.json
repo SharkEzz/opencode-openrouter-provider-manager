@@ -12,8 +12,8 @@
         "reasoning_tokens": 1677571,
         "p50_total_time_to_first_token": 2316,
         "p95_total_time_to_first_token": 3982,
-        "p50_throughput": 117,
-        "cache_hit_rate": 0.98
+        "p50_throughput": 117.32152739346984,
+        "cache_hit_rate": 0.982195714579104
       },
       {
         "model": "deepseek/deepseek-v4-pro-20260813",
@@ -25,7 +25,7 @@
         "tokens_completion": "910016",
         "reasoning_tokens": 519654,
         "p50_total_time_to_first_token": 2004,
-        "p95_total_time_to_first_token": 5089,
+        "p95_total_time_to_first_token": 5089.499999,
         "p50_throughput": 49,
         "cache_hit_rate": 0.98
       },

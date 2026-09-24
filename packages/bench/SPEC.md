@@ -253,7 +253,6 @@ type Observed = {
     permaslug: string; // slug daté exact : deux versions d'un modèle restent des lignes distinctes
     provider: string; // hébergeur réel
     requests: number;
-    usageUsd: number;
     promptTokens: number;
     cachedTokens: number;
     completionTokens: number;
@@ -422,7 +421,7 @@ Fichiers prévus :
   - les percentiles limitent la période à **31 jours** ;
   - `cache_capture_rate` et `possible_*` ne se combinent pas avec les métriques de coût, de latence ni avec le filtre `app`.
 
-  Sortie : `observed/<date>.json`, commité. Il ne contient que les champs de `Observed` (§10) : ni id d'app, de clé, de session ou de génération.
+  Sortie : `observed/<date>.json`, commité. Il ne contient que les champs de `Observed` (§10) : ni id d'app, de clé, de session ou de génération, ni montant dépensé. Les valeurs sont arrondies (TTFT à la ms, débit à 0,1 tok/s, taux de cache à 4 décimales). `--exclude <slug>` (répétable) retire un modèle de l'export ; les noms à exclure se passent en ligne de commande pour ne jamais apparaître dans le dépôt.
 
 - `package.json` : scripts `bench`, `bench:profile`, `bench:observe`, `bench:summarize`, `bench:report`, `typecheck` et `test` ; `tsconfig.json` propre au paquet, qui étend `tsconfig.base.json` à la racine. Le paquet est couvert par les scripts racine (`pnpm typecheck`, `pnpm test`, oxlint et oxfmt).
 - Tests Vitest sur des fixtures, sans appel réel :

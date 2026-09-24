@@ -59,21 +59,20 @@ describe('baseSlug', () => {
 });
 
 describe('toRows', () => {
-  it('coerces string counts and keeps percentiles as numbers', () => {
+  it('coerces string counts and rounds latency, throughput and rates', () => {
     expect(toRows(analytics)[0]).toEqual({
       model: 'deepseek/deepseek-v4.1-flash',
       permaslug: 'deepseek/deepseek-v4.1-flash-20260910',
       provider: 'DeepSeek',
       requests: 3681,
-      usageUsd: 7.95,
       promptTokens: 956212260,
       cachedTokens: 939187584,
       completionTokens: 3224839,
       reasoningTokens: 1677571,
       ttftP50Ms: 2316,
       ttftP95Ms: 3982,
-      tpsP50: 117,
-      cacheHitRate: 0.98,
+      tpsP50: 117.3,
+      cacheHitRate: 0.9822,
     });
   });
   it('keeps two versions of one model as separate rows', () => {
@@ -91,6 +90,18 @@ describe('toRows', () => {
       ttftP50Ms: null,
       cacheHitRate: null,
     });
+  });
+  it('rounds a fractional p95 latency to the millisecond', () => {
+    const pro = toRows(analytics).find((row) => row.provider === 'Alibaba');
+    expect(pro?.ttftP95Ms).toBe(5089);
+  });
+  it('leaves out excluded models, by slug or dated slug', () => {
+    const models = (exclude: string[]) =>
+      toRows(analytics, new Set(exclude)).map((row) => row.permaslug);
+    expect(models(['deepseek/deepseek-v4-pro'])).toEqual(['deepseek/deepseek-v4.1-flash-20260910']);
+    expect(models(['deepseek/deepseek-v4-pro-20260423'])).not.toContain(
+      'deepseek/deepseek-v4-pro-20260423',
+    );
   });
   it('drops rows without a provider, which cannot be pinned', () => {
     expect(toRows(analytics).some((row) => row.model.startsWith('z-ai/'))).toBe(false);
