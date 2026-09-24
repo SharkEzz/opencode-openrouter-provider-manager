@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["node_modules", "plans", ".claude"],
+  "ignorePatterns": ["node_modules", "plans", "packages/design-system"],
   "env": {
     "builtin": true,
     "node": true
@@ -17,7 +17,7 @@
   },
   "overrides": [
     {
-      "files": ["tests/**/*"],
+      "files": ["packages/*/tests/**/*"],
       "plugins": ["vitest"]
     }
   ]

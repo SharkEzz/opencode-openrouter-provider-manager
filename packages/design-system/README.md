@@ -192,7 +192,7 @@ no parallax. At most one `ping` indicator visible at a time.
 | `components/**` | The reusable primitives, one directory per concern. |
 | `ui_kits/obsidian-ide/` | Click-through recreation of the four product surfaces — start at `index.html`. |
 | `thumbnail.html` | Homepage tile for the design system. |
-| `SKILL.md` | Agent-skill wrapper so this folder works inside Claude Code. |
+| `.claude/skills/Obsidian Cyber IDE Design System/SKILL.md` (repository root) | Agent-skill wrapper that points Claude Code to this package. |
 
 ## Components
 

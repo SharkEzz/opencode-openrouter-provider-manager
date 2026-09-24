@@ -1,6 +1,6 @@
 # Spécification : benchmarks Auto vs endpoint épinglé
 
-Statut : **spécification**, rien n'est implémenté. Ce document définit la suite de tests, les métriques, la méthode de comparaison et le format de résultats et la zone benchmark du site de présentation du plugin (`site/`).
+Statut : **spécification**, rien n'est implémenté. Ce document définit la suite de tests, les métriques, la méthode de comparaison et le format de résultats et la zone benchmark du site de présentation du plugin (`apps/site/`).
 
 ## 1. Objectif
 
@@ -12,7 +12,7 @@ Le plugin ajoute à la requête :
 { "provider": { "only": ["openai/flex"], "allow_fallbacks": false } }
 ```
 
-En mode Auto, il laisse le corps de la requête intact. Le benchmark compare donc, pour un même modèle et un même prompt, une requête inchangée et la même requête passée par `pinProvider()` (`src/pin.ts`).
+En mode Auto, il laisse le corps de la requête intact. Le benchmark compare donc, pour un même modèle et un même prompt, une requête inchangée et la même requête passée par `pinProvider()` (`packages/plugin/src/pin.ts`).
 
 Angles mesurés : **coût**, **vitesse**, **prévisibilité**. La qualité des réponses n'est pas mesurée.
 
@@ -20,16 +20,16 @@ Hors périmètre : l'implémentation du site (seuls son contrat de données et s
 
 ## 2. Harness
 
-- Script TypeScript dans `bench/`, exécuté directement par Node 26 (type stripping ; le repo importe déjà en `.ts`).
+- Paquet `@orpm/bench` (`packages/bench/`) du monorepo pnpm, en TypeScript exécuté directement par Node 26 (type stripping ; le repo importe déjà en `.ts`). **Sauf mention contraire, les chemins de ce document sont relatifs à `packages/bench/`.**
 - Appels directs à `https://openrouter.ai/api/v1/chat/completions`, sans passer par OpenCode.
 - La clé est lue dans `OPENROUTER_API_KEY`. Elle n'est jamais écrite dans les résultats.
 - Réutilisation du code du plugin :
-  - `fetchEndpoints()` et `tierOf()` (`src/openrouter.ts`) pour lister et classer les endpoints ;
-  - `pinProvider()` (`src/pin.ts`) pour construire le corps épinglé, identique à celui du plugin.
+  - `fetchEndpoints()` et `tierOf()` (`packages/plugin/src/openrouter.ts`) pour lister et classer les endpoints ;
+  - `pinProvider()` (`packages/plugin/src/pin.ts`) pour construire le corps épinglé, identique à celui du plugin.
 
 ## 3. Modèles
 
-Déclarés dans `bench/config.ts`. Le choix s'appuie sur l'usage OpenCode réel observé (§11.9) : l'essentiel du trafic va vers des modèles open-weight servis par de nombreux hébergeurs, où l'écart entre hébergeurs est le plus fort.
+Déclarés dans `config.ts`. Le choix s'appuie sur l'usage OpenCode réel observé (§11.9) : l'essentiel du trafic va vers des modèles open-weight servis par de nombreux hébergeurs, où l'écart entre hébergeurs est le plus fort.
 
 | Modèle                         | Rôle                                                                                                           |
 | ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
@@ -41,7 +41,7 @@ Les slugs sont vérifiés au dry-run (§13). Les deux modèles open-weight coût
 
 ## 4. Configurations comparées
 
-Pour chaque modèle, les configurations sont résolues au lancement à partir de `/models/{id}/endpoints` et du dernier export observé (`bench/observed/<date>.json`, §12) :
+Pour chaque modèle, les configurations sont résolues au lancement à partir de `/models/{id}/endpoints` et du dernier export observé (`observed/<date>.json`, §12) :
 
 | id           | Requête envoyée                                                                                                                      |
 | ------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
@@ -64,7 +64,7 @@ Pour chaque modèle, les configurations sont résolues au lancement à partir de
 
 ## 5. Workloads
 
-Les prompts sont fixes et versionnés dans `bench/workloads/`. `temperature` est fixe quand le modèle l'accepte, et `max_tokens` est borné pour chaque couple workload × effort (voir ci-dessous).
+Les prompts sont fixes et versionnés dans `workloads/`. `temperature` est fixe quand le modèle l'accepte, et `max_tokens` est borné pour chaque couple workload × effort (voir ci-dessous).
 
 | id            | Contenu                                                         | Mesure surtout                   |
 | ------------- | --------------------------------------------------------------- | -------------------------------- |
@@ -76,13 +76,13 @@ Les prompts sont fixes et versionnés dans `bench/workloads/`. `temperature` est
 ### Détails
 
 - **`agentic`** : les outils sont mockés de façon déterministe sur un filesystem virtuel. Ce sont `read_file`, `list_dir`, `write_file` et `run_tests`, ce dernier renvoyant une sortie fixe. Les runs restent ainsi comparables. On mesure le nombre de tours, le coût cumulé et le temps total.
-- **`big-context`** : un corpus de code figé est placé dans `bench/fixtures/`. Une **série** est une suite de requêtes successives d'une même config qui partagent le même préfixe, ce qui permet de mesurer les `cachedTokens`. Un endpoint épinglé garde son prompt cache ; Auto peut changer d'hébergeur et le perdre.
+- **`big-context`** : un corpus de code figé est placé dans `fixtures/`. Une **série** est une suite de requêtes successives d'une même config qui partagent le même préfixe, ce qui permet de mesurer les `cachedTokens`. Un endpoint épinglé garde son prompt cache ; Auto peut changer d'hébergeur et le perdre.
   - Chaque série commence par un **nonce unique** en tête du préfixe (config × numéro de série). Le 1ᵉʳ appel est donc réellement froid, et aucune config ne profite du cache chauffé par une autre : `auto`, `openai`, `openai/flex` et `openai/fast` partagent probablement le même cache côté OpenAI (même organisation).
   - Pas de warm-up sur ce workload. Le 1ᵉʳ appel de la série est le « cold », les suivants sont les « cached ».
 
 ### Plafond `max_tokens`
 
-Sur les modèles à reasoning, `max_tokens` inclut les tokens de raisonnement. Le plafond est donc fixé par workload × effort, dans `bench/config.ts`. Valeurs de départ, à ajuster après le dry-run :
+Sur les modèles à reasoning, `max_tokens` inclut les tokens de raisonnement. Le plafond est donc fixé par workload × effort, dans `config.ts`. Valeurs de départ, à ajuster après le dry-run :
 
 | workload      | `low` | `medium` | `high` |
 | ------------- | ----- | -------- | ------ |
@@ -137,7 +137,7 @@ Pour `agentic`, les métriques sont aussi agrégées par tâche : somme des coû
 
   La matrice finale est arbitrée à partir du dry-run.
 
-- **Persistance** : les résultats bruts sont écrits au fil de l'eau dans `bench/results/<runId>.jsonl`, et `--resume` reprend un run interrompu. Les JSONL bruts et `summary.json` sont **commités** ensemble, pour que les agrégats restent reproductibles.
+- **Persistance** : les résultats bruts sont écrits au fil de l'eau dans `results/<runId>.jsonl`, et `--resume` reprend un run interrompu. Les JSONL bruts et `summary.json` sont **commités** ensemble, pour que les agrégats restent reproductibles.
 - **Confidentialité** : seules les métriques sont stockées. Ni clé API, ni contenu de réponse.
 
 ## 9. Agrégats et comparaison
@@ -158,11 +158,11 @@ Une cellule correspond à un couple modèle × workload × effort × config. Pou
 - le **cache** : ratio `cachedTokens / promptTokens` sur `big-context`, et « cold vs cached » (coût du 1ᵉʳ appel contre coût médian des suivants) ;
 - le **coût effectif par million de tokens** (entrée, sortie et en cache) : il alimente les cartes KPI et le calculateur d'économies. Le prix catalogue du cache vient de `pricing.input_cache_read` (§12) ; il vaut `null` quand l'endpoint ne l'expose pas.
 
-`npm run bench:report` produit aussi un rapport Markdown (tableaux) pour relire les résultats sans le site.
+`pnpm --filter @orpm/bench bench:report` produit aussi un rapport Markdown (tableaux) pour relire les résultats sans le site.
 
-## 10. Format de résultats : `bench/results/summary.json`
+## 10. Format de résultats : `results/summary.json`
 
-C'est le contrat avec le site (`site/`). Il est validé par un schéma zod (`bench/schema.ts`). Sa forme :
+C'est le contrat avec le site (`apps/site/`). Il est validé par un schéma zod (`schema.ts`). Sa forme :
 
 ```ts
 type Summary = {
@@ -279,7 +279,7 @@ type Sample = {
 
 ## 11. Specs d'affichage de la zone benchmark
 
-La zone benchmark reprend la structure de la **variante 3** des maquettes (« Real-Time Routing Arbitrage »), corrigée pour ne montrer que ce que le plugin fait. Le style suit le design system **Obsidian Cyber IDE** (`.claude/skills/Obsidian Cyber IDE Design System/`, voir son `README.md`). Le texte du site est en **anglais** ; les libellés ci-dessous sont indicatifs. Chaque bloc indique les données de `summary.json` qu'il consomme.
+La zone benchmark reprend la structure de la **variante 3** des maquettes (« Real-Time Routing Arbitrage »), corrigée pour ne montrer que ce que le plugin fait. Le style suit le design system **Obsidian Cyber IDE** (`packages/design-system/`, voir son `README.md`). Le texte du site est en **anglais** ; les libellés ci-dessous sont indicatifs. Chaque bloc indique les données de `summary.json` qu'il consomme.
 
 ### 11.0 Application du design system
 
@@ -400,48 +400,47 @@ Données : `observed`.
 
 ## 12. Feuille de route d'implémentation
 
-Prérequis dans le plugin :
+Prérequis dans le plugin (`packages/plugin/`) :
 
 - Étendre `Endpoint` (`rpc.ts`) avec `cached: number | null`, ajouter `input_cache_read` au schéma `RawEndpoint.pricing` et le lire dans `normalize()` (`src/openrouter.ts`) via `perMillion()`. Mettre à jour les fixtures et `tests/openrouter.test.ts`.
-- Ajouter `zod` en dépendance directe : il n'est aujourd'hui que transitif.
-- Ajouter `tsconfig.bench.json`, référencé dans `tsconfig.json`, car `tsconfig.app.json` n'inclut pas `bench/`.
+- Exposer `./openrouter` et `./pin` dans les `exports` du plugin, pour que le bench importe `fetchEndpoints`, `tierOf` et `pinProvider` via la dépendance `workspace:*`.
 
 Exécution : les runs sont **locaux et ponctuels**, lancés manuellement (pas de CI, pas de secret dans GitHub). Le poste et la région sont notés dans la méthodologie, car ils influencent le TTFT.
 
 Fichiers prévus :
 
-- `bench/config.ts` : modèles, efforts, matrice, n, budget.
-- `bench/strategies.ts` : liste d'endpoints + dernier export observé → configurations (réutilise `fetchEndpoints`, `tierOf` et `pinProvider`). Sans export observé, `fastest` (hors tier priority) et `best-cache` sont omises.
-- `bench/client.ts` : parsing SSE, chronométrage, `usage`, appel `/generation`, classification des erreurs.
-- `bench/workloads/{short,long,agentic,big-context}.ts` et `bench/fixtures/` (corpus figé, mocks d'outils).
-- `bench/run.ts` : CLI avec `--dry-run`, `--max-usd`, `--models`, `--workloads`, `--n`, `--seed` et `--resume`.
-- `bench/stats.ts` (quantiles, bootstrap, CV), `bench/summarize.ts`, `bench/report.ts`, `bench/schema.ts`.
-- `bench/profile.ts` : lit l'historique OpenCode **en lecture seule** (`~/.local/share/opencode/opencode.db`, table `message`, messages `assistant` dont `providerID` vaut `openrouter`). Il agrège `tokens.input`, `tokens.cache.read`, `tokens.output` et `tokens.reasoning` sur une période (`--since`), puis écrit `bench/profiles/coding-agent.json` : les parts, n et la période, **rien d'autre** (ni contenu, ni id de session ou de projet, ni chemin). Ce fichier est commité. `tokens.input` exclut déjà les lectures de cache. `bench:summarize` fusionne ce profil avec les profils dérivés des workloads dans `profiles[]`.
-- `bench/observe.ts` : exporte l'usage réel via `POST /api/v1/analytics/query` avec `OPENROUTER_MANAGEMENT_KEY` (clé de management ; la clé d'inférence renvoie 403). Contraintes constatées :
+- `config.ts` : modèles, efforts, matrice, n, budget.
+- `strategies.ts` : liste d'endpoints + dernier export observé → configurations (réutilise `fetchEndpoints`, `tierOf` et `pinProvider`). Sans export observé, `fastest` (hors tier priority) et `best-cache` sont omises.
+- `client.ts` : parsing SSE, chronométrage, `usage`, appel `/generation`, classification des erreurs.
+- `workloads/{short,long,agentic,big-context}.ts` et `fixtures/` (corpus figé, mocks d'outils).
+- `run.ts` : CLI avec `--dry-run`, `--max-usd`, `--models`, `--workloads`, `--n`, `--seed` et `--resume`.
+- `stats.ts` (quantiles, bootstrap, CV), `summarize.ts`, `report.ts`, `schema.ts`.
+- `profile.ts` : lit l'historique OpenCode **en lecture seule** (`~/.local/share/opencode/opencode.db`, table `message`, messages `assistant` dont `providerID` vaut `openrouter`). Il agrège `tokens.input`, `tokens.cache.read`, `tokens.output` et `tokens.reasoning` sur une période (`--since`), puis écrit `profiles/coding-agent.json` : les parts, n et la période, **rien d'autre** (ni contenu, ni id de session ou de projet, ni chemin). Ce fichier est commité. `tokens.input` exclut déjà les lectures de cache. `bench:summarize` fusionne ce profil avec les profils dérivés des workloads dans `profiles[]`.
+- `observe.ts` : exporte l'usage réel via `POST /api/v1/analytics/query` avec `OPENROUTER_MANAGEMENT_KEY` (clé de management ; la clé d'inférence renvoie 403). Contraintes constatées :
   - le filtre `app` exige l'**id numérique** (le nom renvoie 500) ; on le retrouve via `/generation?id=` sur une génération de l'app (`app_id`) ;
   - les percentiles limitent la période à **31 jours** ;
   - `cache_capture_rate` et `possible_*` ne se combinent pas avec les métriques de coût, de latence ni avec le filtre `app`.
 
-  Sortie : `bench/observed/<date>.json`, commité. Il ne contient que les champs de `Observed` (§10) : ni id d'app, de clé, de session ou de génération.
+  Sortie : `observed/<date>.json`, commité. Il ne contient que les champs de `Observed` (§10) : ni id d'app, de clé, de session ou de génération.
 
-- `package.json` : scripts `bench`, `bench:profile`, `bench:observe`, `bench:summarize` et `bench:report`. `bench/` est inclus dans le typecheck, oxlint et oxfmt.
+- `package.json` : scripts `bench`, `bench:profile`, `bench:observe`, `bench:summarize`, `bench:report`, `typecheck` et `test` ; `tsconfig.json` propre au paquet, qui étend `tsconfig.base.json` à la racine. Le paquet est couvert par les scripts racine (`pnpm typecheck`, `pnpm test`, oxlint et oxfmt).
 - Tests Vitest sur des fixtures, sans appel réel :
-  - `tests/bench-strategies.test.ts` (à partir de `tests/fixtures/gpt-6-sol.endpoints.json`, où `alt-host` doit donner `azure`, de `tests/fixtures/deepseek.endpoints.json`, et d'une fixture observée `tests/fixtures/observed.json` : seuil de 50 requêtes, rapprochement `provider` → tag, stratégie omise sans correspondance, fusion des stratégies qui résolvent vers le même tag) ;
-  - `tests/bench-client.test.ts` (flux SSE fixture, `finish_reason: length`, erreurs 429 et timeout, retry de `/generation`) ;
-  - `tests/bench-stats.test.ts` (quantiles, bootstrap seedé, ratios) ;
-  - `tests/bench-profile.test.ts` (base SQLite fixture en mémoire : parts correctes, aucun champ hors liste blanche dans la sortie).
+  - `tests/strategies.test.ts` (à partir de `packages/plugin/tests/fixtures/gpt-6-sol.endpoints.json`, où `alt-host` doit donner `azure`, de `packages/plugin/tests/fixtures/deepseek.endpoints.json`, et d'une fixture observée `tests/fixtures/observed.json` : seuil de 50 requêtes, rapprochement `provider` → tag, stratégie omise sans correspondance, fusion des stratégies qui résolvent vers le même tag) ;
+  - `tests/client.test.ts` (flux SSE fixture, `finish_reason: length`, erreurs 429 et timeout, retry de `/generation`) ;
+  - `tests/stats.test.ts` (quantiles, bootstrap seedé, ratios) ;
+  - `tests/profile.test.ts` (base SQLite fixture en mémoire : parts correctes, aucun champ hors liste blanche dans la sortie).
 
-Site (`site/`, dans ce dépôt) :
+Site (`apps/site/`, paquet `@orpm/site`) :
 
-- **Vite + React + Tailwind + shadcn/ui**, page statique. Il a son propre `package.json` et reste hors du typecheck, de oxlint et des tests du plugin.
-- `bench/results/summary.json` est importé au build et validé par `bench/schema.ts` : un résultat invalide fait échouer le build.
-- Design system : `site/` importe `tokens/*.css` depuis `.claude/skills/Obsidian Cyber IDE Design System/` (versionné dans le dépôt) et mappe les tokens en variables CSS du thème Tailwind. Les composants du design system (`Panel`, `Badge`, `MetricPair`, `StatusDot`, `Kbd`, `Icon`) sont portés en TSX.
+- **Vite + React + Tailwind + shadcn/ui**, page statique, avec ses propres scripts de typecheck et de test, lancés par les scripts racine.
+- `packages/bench/results/summary.json` est importé au build via la dépendance `@orpm/bench` (`workspace:*`) et validé par son `schema.ts` : un résultat invalide fait échouer le build.
+- Design system : le site dépend de `@orpm/design-system` (`packages/design-system/`, `workspace:*`), importe ses `tokens/*.css` et mappe les tokens en variables CSS du thème Tailwind. Le skill `.claude/skills/Obsidian Cyber IDE Design System/` ne fait que renvoyer vers ce paquet. Les composants du design system (`Panel`, `Badge`, `MetricPair`, `StatusDot`, `Kbd`, `Icon`) sont portés en TSX.
 - shadcn/ui fournit Tabs, Select, Slider et Tooltip, restylés : rayon de 4px, rangées de 36px, segment sélectionné `#0058be`, focus `#adc6ff`, surfaces flottantes en verre (95 % `#131313`, `blur(16px)`, liseré `rgba(0,88,190,.3)`). La bibliothèque de graphiques est à choisir lors de l'implémentation.
 
 Vérification :
 
-1. `npm run typecheck && npm test && npm run lint:check && npm run format:check`.
-2. `npm run bench -- --dry-run` : matrice résolue et coût estimé inférieur à 5 $, sans appel payant.
+1. `pnpm typecheck && pnpm test && pnpm lint:check && pnpm format:check` à la racine.
+2. `pnpm --filter @orpm/bench bench --dry-run` : matrice résolue et coût estimé inférieur à 5 $, sans appel payant.
 3. Un mini-run réel (`--n 1 --workloads short --max-usd 0.10`), puis `bench:summarize` et `bench:report`. Ce run se fait uniquement avec accord, car il consomme des crédits.
 
 ## 13. Points ouverts

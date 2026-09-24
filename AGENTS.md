@@ -2,17 +2,26 @@
 
 ## Project Structure & Module Organization
 
-This is an OpenCode V2 plugin for choosing a specific OpenRouter endpoint per model. `index.ts` loads the server plugin; `tui.tsx` provides the `/provider` picker and sidebar. `rpc.ts` defines their shared RPC schemas. Keep request hooks, endpoint fetching, pinning, formatting, and model state helpers in `src/`. Put Vitest files in `tests/*.test.ts` and sample API responses in `tests/fixtures/`. There are no separate application assets or build output.
+This is a pnpm workspace around an OpenCode V2 plugin for choosing a specific OpenRouter endpoint per model. Libraries live in `packages/`, applications in `apps/`; shared tooling (`tsconfig.base.json`, `.oxfmtrc.json`, `.oxlintrc.json`) stays at the root.
+
+- `packages/plugin/` (`openrouter-provider-manager`): `index.ts` loads the server plugin; `tui.tsx` provides the `/provider` picker and sidebar. `rpc.ts` defines their shared RPC schemas. Keep request hooks, endpoint fetching, pinning, formatting, and model state helpers in `src/`. Put Vitest files in `tests/*.test.ts` and sample API responses in `tests/fixtures/`.
+- `packages/bench/` (`@orpm/bench`): the Auto vs pinned benchmark. `SPEC.md` is the source of truth until the code exists.
+- `packages/design-system/` (`@orpm/design-system`): design tokens and components for the site. The generated bundle is excluded from lint and format. The `.claude/skills/` entry only points to this package.
+- `apps/site/` and `apps/docs/` are planned.
+
+Internal packages use the `@orpm/` scope and `workspace:*` dependencies. Declare every package a file imports in that package's own `package.json`; pnpm does not hoist undeclared dependencies.
 
 ## Build, Test, and Development Commands
 
-- `npm ci` installs the locked dependencies (Node 26).
-- `npm run typecheck` checks the strict TypeScript project without emitting files.
-- `npm test` runs the Vitest suite once; `npm run test:watch` reruns it during development.
-- `npm run test:coverage` reports V8 coverage for `src/`, `index.ts`, and `rpc.ts`.
-- `npm run format:check` and `npm run lint:check` validate formatting and lint rules. `npm run format` and `npm run lint` rewrite files, so inspect the diff afterward.
+Run these from the repository root:
 
-There is no build script. To check TUI behavior locally, load this package as an OpenCode plugin and open `/provider` on an OpenRouter model. Do not send a model request merely to inspect the picker.
+- `pnpm install --frozen-lockfile` installs the locked dependencies (Node 26, pnpm 12).
+- `pnpm typecheck` checks every package's strict TypeScript project without emitting files.
+- `pnpm test` runs every package's Vitest suite once; `pnpm --filter <package> test:watch` reruns one during development.
+- `pnpm test:coverage` reports V8 coverage (for the plugin: `src/`, `index.ts`, and `rpc.ts`).
+- `pnpm format:check` and `pnpm lint:check` validate formatting and lint rules. `pnpm format` and `pnpm lint` rewrite files, so inspect the diff afterward.
+
+There is no build script for the plugin. To check TUI behavior locally, load `packages/plugin` as an OpenCode plugin by absolute path and open `/provider` on an OpenRouter model. Do not send a model request merely to inspect the picker.
 
 ## Coding Style & Naming Conventions
 
@@ -24,4 +33,4 @@ Use Vitest with `describe` and behavior-focused `it` names. Add or update tests 
 
 ## Commit & Pull Request Guidelines
 
-Recent commits use concise subjects, sometimes with `fix:` or `chore:` prefixes; follow that style and describe the behavior changed. In pull requests, explain the user-visible effect, list verification commands and results, and include a screenshot or ANSI capture for TUI changes. Link an issue when one exists. Never commit API keys or request logs; credentials come from the OpenCode connection or `OPENROUTER_API_KEY`.
+Recent commits use concise subjects, sometimes with `fix:` or `chore:` prefixes; follow that style and describe the behavior changed. In pull requests, explain the user-visible effect, list verification commands and results, and include a screenshot or ANSI capture for TUI changes. Link an issue when one exists. Never commit API keys or request logs; credentials come from the OpenCode connection, `OPENROUTER_API_KEY`, or, for analytics exports only, `OPENROUTER_MANAGEMENT_KEY`.
