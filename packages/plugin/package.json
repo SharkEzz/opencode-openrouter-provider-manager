@@ -13,7 +13,9 @@
   "exports": {
     ".": "./index.ts",
     "./tui": "./tui.tsx",
-    "./rpc": "./rpc.ts"
+    "./rpc": "./rpc.ts",
+    "./openrouter": "./src/openrouter.ts",
+    "./pin": "./src/pin.ts"
   },
   "scripts": {
     "typecheck": "tsc -b --noEmit",
