@@ -1,6 +1,6 @@
 # Spécification : benchmarks Auto vs endpoint épinglé
 
-Statut : **spécification**, rien n'est implémenté. Ce document définit la suite de tests, les métriques, la méthode de comparaison et le format de résultats qu'utilisera le futur site de présentation du plugin.
+Statut : **spécification**, rien n'est implémenté. Ce document définit la suite de tests, les métriques, la méthode de comparaison et le format de résultats et la zone benchmark du site de présentation du plugin (`site/`).
 
 ## 1. Objectif
 
@@ -16,7 +16,7 @@ En mode Auto, il laisse le corps de la requête intact. Le benchmark compare don
 
 Angles mesurés : **coût**, **vitesse**, **prévisibilité**. La qualité des réponses n'est pas mesurée.
 
-Hors périmètre : le site lui-même, l'exécution via OpenCode et les évaluations de qualité.
+Hors périmètre : l'implémentation du site (seuls son contrat de données et sa zone benchmark sont spécifiés, §10 et §11), l'exécution via OpenCode et les évaluations de qualité.
 
 ## 2. Harness
 
@@ -159,7 +159,7 @@ Une cellule correspond à un couple modèle × workload × effort × config. Pou
 
 ## 10. Format de résultats : `bench/results/summary.json`
 
-C'est le contrat avec le futur site. Il est validé par un schéma zod (`bench/schema.ts`). Sa forme :
+C'est le contrat avec le site (`site/`). Il est validé par un schéma zod (`bench/schema.ts`). Sa forme :
 
 ```ts
 type Summary = {
@@ -169,6 +169,7 @@ type Summary = {
   cells: Cell[]; // agrégats par modèle × workload × effort × config
   endpoints: EndpointSnapshot[]; // prix, contexte, quantization au moment du run
   costModel: CostModel[]; // $/M effectifs par modèle × config
+  profiles: Profile[]; // répartitions de tokens pour le calculateur (§11.3)
   samples: Sample[]; // points bruts allégés pour les distributions
 };
 
@@ -230,6 +231,16 @@ type CostModel = {
   cachedPerM: number | null; // null si l'endpoint n'expose pas input_cache_read
 };
 
+type Profile = {
+  id: string; // 'coding-agent', 'chat', 'long-generation'…
+  label: string; // libellé anglais affiché sur le site
+  source: 'bench' | 'opencode-history';
+  // parts du volume total de tokens, somme = 1 ; reasoning est facturé comme output
+  shares: { input: number; cachedInput: number; output: number; reasoning: number };
+  n: number; // requêtes ayant servi au calcul
+  period?: { from: string; to: string }; // opencode-history uniquement
+};
+
 type Sample = {
   model: string;
   workload: string;
@@ -243,71 +254,91 @@ type Sample = {
 };
 ```
 
-## 11. Specs d'affichage pour le futur site
+## 11. Specs d'affichage de la zone benchmark
 
-Elles s'inspirent des maquettes fournies : style terminal sombre, police mono, accents cyan, bleu et rose, cartes à bord arrondi. Chaque bloc indique les données de `summary.json` qu'il consomme.
+La zone benchmark suit la **variante 3** des maquettes (« Real-Time Routing Arbitrage »), corrigée pour ne montrer que ce que le plugin fait : style terminal sombre, police mono, accents cyan, bleu et rose, cartes à bord arrondi. Le texte du site est en **anglais** ; les libellés ci-dessous sont indicatifs. Chaque bloc indique les données de `summary.json` qu'il consomme.
 
-### 11.1 Bandeau de stats du hero
+**Message** : le plugin permet de **choisir son compromis** sur un même modèle. Épingler `flex` coûte moins cher mais répond plus lentement ; épingler `fast` répond plus vite mais coûte plus cher. Aucun bloc ne présente un gain sans sa contrepartie.
 
-Quatre tuiles compactes :
+### 11.1 En-tête
 
-- coût médian −X % (meilleur pin contre Auto) ;
-- TTFT médian (`fastest` contre Auto) ;
-- stabilité (ratio p95/p50 du TTFT) ;
-- taux de cache hit (`big-context`, pin contre Auto).
+- Surtitre, titre et sous-titre qui annoncent le compromis coût/vitesse, sans chiffre inventé (ex. « Pick your trade-off: cheaper or faster, same model »).
+- Sous le titre, une ligne muted : `<modèles> · run <date> · commit <sha> · n=<total>` et un lien vers la méthodologie (§11.7).
 
-Chaque tuile porte un sous-titre muted : `vs Auto · <modèle> · n=<n>`.
-Données : `headlines[]`.
+Données : `run`, `cells[]`.
 
-### 11.2 Section « Auto vs Plugin »
+### 11.2 Contrôles
 
-- Un toggle segmenté **Auto | Plugin**.
-- Des onglets de stratégie : **Coût** (`cheapest`), **Vitesse** (`fastest`), **Défaut**, **Azure**.
-- Un sélecteur de modèle et un sélecteur d'effort.
-- Trois cartes KPI, chacune avec un grand chiffre coloré, `vs <valeur> auto` en muted, puis une ligne d'explication. Les trois métriques :
-  - latence TTFT p50 ;
-  - coût effectif par million de tokens ;
-  - constance du cache hit.
+- **Onglets de stratégie** : **Cost** (`cheapest`, sélectionné par défaut), **Speed** (`fastest`), **Default** (`default`), **Alt host** (`alt-host`, libellé = hébergeur réel, ex. « Azure »). Une stratégie absente pour le modèle choisi est grisée, avec une infobulle qui explique pourquoi.
+- **Sélecteur de modèle** et **sélecteur d'effort** (`low` / `medium` / `high`, limité aux efforts mesurés pour le workload affiché).
+- **Slider de volume** en **tokens par jour**, échelle logarithmique de **100k à 100M**. Il n'y a pas de presets de volume.
+- **Sélecteur de profil** d'usage (répartition des tokens) : `Coding agent`, `Chat`, `Long generation`. Voir §11.3.
 
-Données : `cells[]` filtrées par (modèle, config, effort).
+Tous les blocs suivants réagissent à ces contrôles.
 
-### 11.3 Cartes d'analyse avec barres comparatives
+### 11.3 Calculateur
 
-- **Coût par tâche agentique** : deux barres horizontales, Auto contre pin (`$0.12 vs $0.07`), avec un badge `−42 %`.
-- **Cold call vs cached replay** (`big-context`) : coût du premier appel, coût d'un appel en cache, pourcentage d'économie.
-- **Où Auto a routé** : barres de répartition de `providerUsed` (`openai 71 % · azure 29 %`).
-- **Stabilité dans le temps** : sparkline du TTFT au fil du run, Auto contre pin.
+Deux montants côte à côte, **Auto** et **Pinned (<tag>)**, par jour et par mois (× 30), plus l'écart en valeur et en pourcentage, signé : un pin `fastest` affiche un surcoût, pas une économie.
 
-Données : `cells[]` (`coldVsCached`, `providers`) et `samples[]`.
+Calcul : `volume × Σ(part du profil × prix effectif /M de la config)` pour chaque config. `reasoning` est facturé au prix de sortie. Si `cachedPerM` vaut `null`, les tokens en cache sont facturés au prix d'entrée, et une note le signale.
 
-### 11.4 Matrice des endpoints
+Le résultat est présenté comme une **estimation**, avec en muted la source du profil :
 
-Un tableau par modèle, avec des onglets de tri **Prix · TTFT · Débit · Fiabilité**.
+- `bench` : répartition mesurée sur les workloads du bench (`chat` ← `short`, `long-generation` ← `long`) ;
+- `opencode-history` : `coding-agent` calibré sur un historique OpenCode réel, avec sa période et son n (§12).
 
-- Colonnes : tag, prix in et out /M, contexte, quantization, TTFT p50, tok/s p50, taux de succès (badge vert ou rouge), cache ratio, **Δ vs Auto** (badge coloré).
+Données : `costModel[]`, `profiles[]`.
+
+### 11.4 Cartes de comparaison
+
+Quatre cartes en grille 2 × 2. Chacune affiche **deux barres horizontales, Auto contre pin**, un badge de ratio coloré selon le sens (vert si c'est mieux, rose si c'est pire) et, en muted, `n=<ok>/<n>` et l'IC 95 %. Si l'IC contient 1, le badge est gris et porte « no significant difference ».
+
+| Carte           | Barres (Auto vs pin)                                                 | Détail sous les barres                                                                                              | Source                               |
+| --------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
+| **Cost**        | coût effectif /M selon le profil, et coût médian par tâche `agentic` | `vsAuto.cost` et son IC                                                                                             | `costModel[]`, `cells[]` (`agentic`) |
+| **Speed**       | TTFT p50 et tok/s p50                                                | TTFT p95, `vsAuto.ttft`                                                                                             | `cells[]` (`short`, `long`)          |
+| **Cache**       | `cacheRatio` sur `big-context`                                       | cold vs cached (`coldVsCached`), `vsAuto.cacheHit`                                                                  | `cells[]` (`big-context`)            |
+| **Reliability** | taux de succès                                                       | erreurs par type (`http_429`…), `truncated` ; pour Auto : hébergeurs utilisés (`providers`) et `providerSwitchRate` | `cells[]`                            |
+
+La carte **Reliability** est obligatoire et ne masque rien : un pin sans fallback peut échouer là où Auto aurait basculé, et cela doit se voir.
+
+### 11.5 Graphique du compromis
+
+Un **nuage coût × TTFT** : axe X = TTFT p50 (ms), axe Y = coût effectif /M selon le profil choisi. Un point par config du modèle sélectionné, avec des barres d'erreur (IC de la médiane du TTFT). Auto est en gris, la config de l'onglet actif est mise en avant, les autres sont en couleur atténuée. Des facettes ou un sélecteur permettent de changer de workload (`short` par défaut).
+
+En dessous, une **sparkline du TTFT au fil du run**, Auto contre pin. Comme les runs sont locaux et ponctuels (§12), elle couvre la durée d'un run, pas des semaines ; le libellé le dit (« over the <durée> run »).
+
+Données : `cells[]`, `costModel[]`, `profiles[]`, `samples[]`.
+
+### 11.6 Matrice des endpoints
+
+Un tableau par modèle, avec des onglets de tri **Price · TTFT · Throughput · Reliability**.
+
+- Colonnes : tag, prix in et out /M, prix cache /M, contexte, quantization, TTFT p50, tok/s p50, taux de succès (badge vert ou rouge), cache ratio, **Δ vs Auto** (badge coloré).
 - La ligne Auto apparaît en tête, comme dans le picker `/provider`.
 
 Données : `endpoints[]` jointes à `cells[]`.
 
-### 11.5 Calculateur d'économies
-
-Un curseur de volume mensuel de tokens et un choix de modèle affichent « ≈ $X/mois économisés ». Le résultat est présenté comme une estimation, calculée à partir des coûts effectifs mesurés (Auto contre pin choisi).
-Données : `costModel[]`.
-
-### 11.6 Section « Détails » (repliable)
+### 11.7 Section « Details » (repliable)
 
 - Strip ou box plots de `ttftMs` et `outputTps` : chaque point est une requête, Auto en gris et les pins en couleur.
-- Scatter coût × latence avec intervalles de confiance, un point par config, en facettes par workload.
-- Tableau complet p50/p90/p95 avec les erreurs.
-- Méthodologie, date du snapshot des prix et commit du run.
+- Tableau complet p50/p90/p95 avec les erreurs, toutes cellules confondues.
+- Méthodologie : protocole (§8), statistiques (§9), limites connues (runs locaux, n faible sur Sol, TTFT dépendant de la connexion du poste), date du snapshot des prix et commit du run.
 
-Données : `samples[]` et `cells[]`.
+Données : `samples[]`, `cells[]`, `run`.
 
-### 11.7 Règles de contenu
+### 11.8 Règles de contenu
 
 - N'afficher que des chiffres mesurés, toujours accompagnés de n, de la date du run et d'un lien vers la méthodologie.
+- Toujours montrer la contrepartie d'un gain : une économie s'affiche avec la latence correspondante, et un gain de vitesse avec son surcoût.
 - Pas de témoignages, d'étoiles GitHub ni de « live telemetry » inventés.
-- Ne pas promettre de fallback automatique ni de routing « cache-aware » : le plugin fait l'inverse (`allow_fallbacks: false`). La fiabilité d'un pin s'affiche honnêtement, taux d'erreur compris.
+- Les maquettes contiennent des affirmations **interdites**, parce que fausses pour ce plugin :
+  - fallback automatique, « failover » ou « sub-40ms fallback » : le plugin impose `allow_fallbacks: false` ;
+  - « arbitrage », routing dynamique ou « cache-aware » : le plugin épingle un endpoint fixe ;
+  - « transport-layer proxy » et compatibilité Cursor, VS Code, Zed ou Neovim : c'est un plugin OpenCode ;
+  - intégration MCP, installation via `curl … | bash`, « 280+ endpoints », « 99.99 % uptime », « encrypted routing credentials » ;
+  - hébergeurs non mesurés (ex. Bedrock) et chiffres de cache, de ROI ou d'économie non issus de `summary.json`.
+- Les boutons d'appel à l'action pointent vers l'installation du plugin et le dépôt, jamais vers une « activation » de routing.
 
 ## 12. Feuille de route d'implémentation
 
@@ -317,6 +348,8 @@ Prérequis dans le plugin :
 - Ajouter `zod` en dépendance directe : il n'est aujourd'hui que transitif.
 - Ajouter `tsconfig.bench.json`, référencé dans `tsconfig.json`, car `tsconfig.app.json` n'inclut pas `bench/`.
 
+Exécution : les runs sont **locaux et ponctuels**, lancés manuellement (pas de CI, pas de secret dans GitHub). Le poste et la région sont notés dans la méthodologie, car ils influencent le TTFT.
+
 Fichiers prévus :
 
 - `bench/config.ts` : modèles, efforts, matrice, n, budget.
@@ -325,11 +358,19 @@ Fichiers prévus :
 - `bench/workloads/{short,long,agentic,big-context}.ts` et `bench/fixtures/` (corpus figé, mocks d'outils).
 - `bench/run.ts` : CLI avec `--dry-run`, `--max-usd`, `--models`, `--workloads`, `--n`, `--seed` et `--resume`.
 - `bench/stats.ts` (quantiles, bootstrap, CV), `bench/summarize.ts`, `bench/report.ts`, `bench/schema.ts`.
-- `package.json` : scripts `bench`, `bench:summarize` et `bench:report`. `bench/` est inclus dans le typecheck, oxlint et oxfmt.
+- `bench/profile.ts` : lit l'historique OpenCode **en lecture seule** (`~/.local/share/opencode/opencode.db`, table `message`, messages `assistant` dont `providerID` vaut `openrouter`). Il agrège `tokens.input`, `tokens.cache.read`, `tokens.output` et `tokens.reasoning` sur une période (`--since`), puis écrit `bench/profiles/coding-agent.json` : les parts, n et la période, **rien d'autre** (ni contenu, ni id de session ou de projet, ni chemin). Ce fichier est commité. `tokens.input` exclut déjà les lectures de cache. `bench:summarize` fusionne ce profil avec les profils dérivés des workloads dans `profiles[]`.
+- `package.json` : scripts `bench`, `bench:profile`, `bench:summarize` et `bench:report`. `bench/` est inclus dans le typecheck, oxlint et oxfmt.
 - Tests Vitest sur des fixtures, sans appel réel :
   - `tests/bench-strategies.test.ts` (à partir de `tests/fixtures/gpt-6-sol.endpoints.json`, où `alt-host` doit donner `azure`, et de `tests/fixtures/deepseek.endpoints.json`) ;
   - `tests/bench-client.test.ts` (flux SSE fixture, `finish_reason: length`, erreurs 429 et timeout, retry de `/generation`) ;
-  - `tests/bench-stats.test.ts` (quantiles, bootstrap seedé, ratios).
+  - `tests/bench-stats.test.ts` (quantiles, bootstrap seedé, ratios) ;
+  - `tests/bench-profile.test.ts` (base SQLite fixture en mémoire : parts correctes, aucun champ hors liste blanche dans la sortie).
+
+Site (`site/`, dans ce dépôt) :
+
+- **Vite + React + Tailwind + shadcn/ui**, page statique. Il a son propre `package.json` et reste hors du typecheck, de oxlint et des tests du plugin.
+- `bench/results/summary.json` est importé au build et validé par `bench/schema.ts` : un résultat invalide fait échouer le build.
+- Composants shadcn pour les onglets, le slider, les selects, les cartes et les badges ; la bibliothèque de graphiques est à choisir lors de l'implémentation.
 
 Vérification :
 
@@ -341,3 +382,5 @@ Vérification :
 
 - Les slugs OpenRouter exacts de GPT 6 Terra et Sol, et celui du modèle multi-hébergeurs.
 - La matrice finale et les plafonds `max_tokens`, à arbitrer après le premier dry-run.
+- La période d'historique OpenCode retenue pour le profil `coding-agent`.
+- La bibliothèque de graphiques du site.
