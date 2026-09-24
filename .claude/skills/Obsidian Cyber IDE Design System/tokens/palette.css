@@ -1,0 +1,88 @@
+/* Raw palette. Material-3 style role names carried over verbatim from the
+   brand kit, plus the functional semantics and glass primitives from the
+   brand prose. Do not consume these directly in product code -- use the
+   semantic aliases in colors.css. */
+:root{
+  /* neutrals / surfaces */
+  --obs-surface:#131313;
+  --obs-surface-dim:#131313;
+  --obs-surface-bright:#393939;
+  --obs-surface-container-lowest:#0e0e0e;
+  --obs-surface-container-low:#1b1b1b;
+  --obs-surface-container:#1f1f1f;
+  --obs-surface-container-high:#2a2a2a;
+  --obs-surface-container-highest:#353535;
+  --obs-surface-variant:#353535;
+  --obs-void:#000000;
+  --obs-on-surface:#e2e2e2;
+  --obs-on-surface-variant:#c2c6d5;
+  --obs-inverse-surface:#e2e2e2;
+  --obs-inverse-on-surface:#303030;
+  --obs-outline:#8c909e;
+  --obs-outline-variant:#424753;
+  --obs-background:#131313;
+  --obs-on-background:#e2e2e2;
+
+  /* primary -- terminal electric blue */
+  --obs-primary:#adc6ff;
+  --obs-on-primary:#002e6a;
+  --obs-primary-container:#0058be;
+  --obs-on-primary-container:#c4d5ff;
+  --obs-inverse-primary:#085ac0;
+  --obs-primary-fixed:#d8e2ff;
+  --obs-primary-fixed-dim:#adc6ff;
+  --obs-on-primary-fixed:#001a42;
+  --obs-on-primary-fixed-variant:#004395;
+  --obs-surface-tint:#adc6ff;
+
+  /* secondary -- cyber cyan */
+  --obs-secondary:#85d3db;
+  --obs-on-secondary:#00363a;
+  --obs-secondary-container:#006970;
+  --obs-on-secondary-container:#97e5ed;
+  --obs-secondary-fixed:#a1eff7;
+  --obs-secondary-fixed-dim:#85d3db;
+  --obs-on-secondary-fixed:#002022;
+  --obs-on-secondary-fixed-variant:#004f54;
+
+  /* tertiary -- neon magenta */
+  --obs-tertiary:#fbabff;
+  --obs-on-tertiary:#570065;
+  --obs-tertiary-container:#9e00b5;
+  --obs-on-tertiary-container:#fec0ff;
+  --obs-tertiary-fixed:#ffd6fd;
+  --obs-tertiary-fixed-dim:#fbabff;
+  --obs-on-tertiary-fixed:#36003f;
+  --obs-on-tertiary-fixed-variant:#7c008e;
+
+  /* error */
+  --obs-error:#ffb4ab;
+  --obs-on-error:#690005;
+  --obs-error-container:#93000a;
+  --obs-on-error-container:#ffdad6;
+
+  /* functional semantics (brand prose) */
+  --obs-emerald:#10b981;
+  --obs-amber:#f59e0b;
+  --obs-crimson:#ef4444;
+  --obs-slate-400:#94a3b8;
+  --obs-slate-500:#64748b;
+  --obs-slate-800:#1e293b;
+
+  /* alpha primitives for glass, rims and glows */
+  --obs-white-04:rgba(255,255,255,.04);
+  --obs-white-06:rgba(255,255,255,.06);
+  --obs-white-08:rgba(255,255,255,.08);
+  --obs-white-12:rgba(255,255,255,.12);
+  --obs-blue-12:rgba(0,88,190,.12);
+  --obs-blue-20:rgba(0,88,190,.2);
+  --obs-blue-30:rgba(0,88,190,.3);
+  --obs-cyan-12:rgba(0,105,112,.12);
+  --obs-cyan-20:rgba(0,105,112,.2);
+  --obs-cyan-25:rgba(0,105,112,.25);
+  --obs-magenta-12:rgba(158,0,181,.12);
+  --obs-magenta-20:rgba(158,0,181,.2);
+  --obs-amber-16:rgba(245,158,11,.16);
+  --obs-crimson-16:rgba(239,68,68,.16);
+  --obs-emerald-16:rgba(16,185,129,.16);
+}

@@ -1,0 +1,31 @@
+:root{
+  --font-sans:"Inter",system-ui,-apple-system,"Segoe UI",sans-serif;
+  --font-mono:"JetBrains Mono",ui-monospace,"SF Mono",Menlo,Consolas,monospace;
+
+  --headline-lg-size:1.75rem;   --headline-lg-lh:2.25rem;  --headline-lg-ls:-0.02em;
+  --headline-md-size:1.25rem;   --headline-md-lh:1.75rem;  --headline-md-ls:-0.015em;
+  --headline-sm-size:1rem;      --headline-sm-lh:1.5rem;   --headline-sm-ls:-0.01em;
+  --body-lg-size:0.9375rem;     --body-lg-lh:1.5rem;       --body-lg-ls:-0.01em;
+  --body-md-size:0.8125rem;     --body-md-lh:1.375rem;     --body-md-ls:0em;
+  --body-sm-size:0.75rem;       --body-sm-lh:1.125rem;     --body-sm-ls:0em;
+  --label-md-size:0.75rem;      --label-md-lh:1rem;        --label-md-ls:0.02em;
+  --label-sm-size:0.6875rem;    --label-sm-lh:0.875rem;    --label-sm-ls:0.04em;
+  --code-dense-size:0.75rem;    --code-dense-lh:1.25rem;   --code-dense-ls:-0.01em;
+
+  --weight-regular:400;
+  --weight-medium:500;
+  --weight-semibold:600;
+
+  /* tabular figures + slashed zero, mandatory on all mono surfaces */
+  --mono-features:"tnum" 1,"zero" 1,"ss01" 1,"cv02" 1; /* @kind other */
+}
+
+.headline-lg{font-family:var(--font-sans);font-size:var(--headline-lg-size);line-height:var(--headline-lg-lh);letter-spacing:var(--headline-lg-ls);font-weight:600}
+.headline-md{font-family:var(--font-sans);font-size:var(--headline-md-size);line-height:var(--headline-md-lh);letter-spacing:var(--headline-md-ls);font-weight:600}
+.headline-sm{font-family:var(--font-sans);font-size:var(--headline-sm-size);line-height:var(--headline-sm-lh);letter-spacing:var(--headline-sm-ls);font-weight:600}
+.body-lg{font-family:var(--font-mono);font-size:var(--body-lg-size);line-height:var(--body-lg-lh);letter-spacing:var(--body-lg-ls);font-weight:400}
+.body-md{font-family:var(--font-mono);font-size:var(--body-md-size);line-height:var(--body-md-lh);letter-spacing:var(--body-md-ls);font-weight:400}
+.body-sm{font-family:var(--font-mono);font-size:var(--body-sm-size);line-height:var(--body-sm-lh);letter-spacing:var(--body-sm-ls);font-weight:400}
+.label-md{font-family:var(--font-mono);font-size:var(--label-md-size);line-height:var(--label-md-lh);letter-spacing:var(--label-md-ls);font-weight:500}
+.label-sm{font-family:var(--font-mono);font-size:var(--label-sm-size);line-height:var(--label-sm-lh);letter-spacing:var(--label-sm-ls);font-weight:600;text-transform:uppercase}
+.code-dense{font-family:var(--font-mono);font-size:var(--code-dense-size);line-height:var(--code-dense-lh);letter-spacing:var(--code-dense-ls);font-weight:400}

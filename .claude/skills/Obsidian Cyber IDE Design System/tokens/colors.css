@@ -1,0 +1,59 @@
+/* Semantic aliases. This is the layer product code should consume. */
+:root{
+  /* canvas + panes */
+  --surface-canvas:var(--obs-void);            /* level 0: editor code workspace */
+  --surface-app:var(--obs-surface);            /* app chrome / shell */
+  --surface-docked:var(--obs-surface-container-low);   /* level 1: sidebars, registries */
+  --surface-pane:var(--obs-surface-container);
+  --surface-raised:var(--obs-surface-container-high);
+  --surface-input:var(--obs-surface-container-lowest);
+  --surface-hover:var(--obs-white-04);
+  --surface-active:var(--obs-white-08);
+  --surface-selected:var(--obs-primary-container);
+  --surface-selected-tint:var(--obs-slate-800);
+
+  /* text */
+  --text-primary:var(--obs-on-surface);
+  --text-secondary:var(--obs-on-surface-variant);
+  --text-muted:var(--obs-slate-400);
+  --text-faint:var(--obs-slate-500);
+  --text-on-accent:#ffffff;
+  --text-inverse:var(--obs-inverse-on-surface);
+  --text-link:var(--obs-primary);
+  --text-link-hover:var(--obs-primary-fixed);
+
+  /* lines */
+  --hairline:var(--obs-white-08);
+  --border-subtle:var(--obs-white-06);
+  --border-strong:var(--obs-outline-variant);
+  --border-input:var(--obs-outline-variant);
+  --border-focus:var(--obs-primary);
+  --rim-electric:var(--obs-blue-30);
+
+  /* accents */
+  --accent-route:var(--obs-primary-container);      /* active selection vectors */
+  --accent-route-ink:var(--obs-primary);
+  --accent-telemetry:var(--obs-secondary-container); /* cyan: uptime, live rates */
+  --accent-telemetry-ink:var(--obs-secondary);
+  --accent-meta:var(--obs-tertiary-container);       /* magenta: cache, build meta */
+  --accent-meta-ink:var(--obs-tertiary);
+
+  /* status */
+  --status-ok:var(--obs-emerald);
+  --status-ok-bg:var(--obs-emerald-16);
+  --status-warn:var(--obs-amber);
+  --status-warn-bg:var(--obs-amber-16);
+  --status-fault:var(--obs-crimson);
+  --status-fault-bg:var(--obs-crimson-16);
+  --status-idle:var(--obs-slate-500);
+
+  /* syntax (editor canvas) */
+  --syntax-plain:var(--obs-on-surface);
+  --syntax-comment:var(--obs-slate-500);
+  --syntax-keyword:var(--obs-tertiary);
+  --syntax-string:var(--obs-secondary);
+  --syntax-fn:var(--obs-primary);
+  --syntax-number:var(--obs-amber);
+  --syntax-type:var(--obs-secondary-fixed);
+  --syntax-gutter:var(--obs-slate-500);
+}

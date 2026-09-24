@@ -1,0 +1,7 @@
+/* Obsidian Cyber IDE webfonts — Inter (chrome, headlines) + JetBrains Mono (everything else).
+   No vendor font binaries shipped with the brand kit, so both faces are loaded from
+   public CDNs: variable woff2 via jsDelivr/Fontsource, with Google Fonts as a fallback
+   stylesheet. Drop real binaries into assets/fonts/ and repoint `src` when available. */
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600;700&display=swap");
+@font-face{font-family:"Inter";font-style:normal;font-weight:100 900;font-display:swap;src:url(https://cdn.jsdelivr.net/fontsource/fonts/inter:vf@latest/latin-wght-normal.woff2) format("woff2-variations")}
+@font-face{font-family:"JetBrains Mono";font-style:normal;font-weight:100 800;font-display:swap;src:url(https://cdn.jsdelivr.net/fontsource/fonts/jetbrains-mono:vf@latest/latin-wght-normal.woff2) format("woff2-variations")}

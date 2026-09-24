@@ -1,6 +1,6 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "ignorePatterns": ["node_modules", "plans"],
+  "ignorePatterns": ["node_modules", "plans", ".claude"],
   "env": {
     "builtin": true,
     "node": true

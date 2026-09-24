@@ -1,0 +1,49 @@
+<!-- @dsCard group="Components" viewport="700x250" name="Telemetry" subtitle="Badge, StatusDot, TokenBudgetBar, MetricPair" -->
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{background:var(--surface-app);margin:0;padding:var(--space-lg)}#root{width:100%}.row{display:flex;flex-wrap:wrap;gap:var(--space-lg);align-items:center}.col{display:grid;gap:var(--space-md);align-content:start}.key{font-family:var(--font-mono);font-size:var(--label-sm-size);letter-spacing:var(--label-sm-ls);font-weight:600;text-transform:uppercase;color:var(--text-faint)}</style>
+</head><body><div id="root"></div>
+<script type="text/babel">
+const { Badge, StatusDot, TokenBudgetBar, MetricPair, Icon } = window.ObsidianCyberIDEDesignSystem_fe171d;
+function Card(){
+  return (
+    <div className="col" style={{gap:'var(--space-lg)'}}>
+      <div className="row" style={{gap:'var(--space-sm)'}}>
+        <Badge tone="route">@fast</Badge>
+        <Badge tone="telemetry" dot>live</Badge>
+        <Badge tone="meta">cache 41%</Badge>
+        <Badge tone="ok" dot>healthy</Badge>
+        <Badge tone="warn" shape="pill" dot>degraded</Badge>
+        <Badge tone="fault" dot>429</Badge>
+        <Badge tone="neutral">local</Badge>
+        <Badge tone="solid">routing</Badge>
+        <Badge tone="telemetry" leading={<Icon name="activity" size={10}/>}>82 tok/s</Badge>
+      </div>
+      <div className="row" style={{gap:'var(--space-xl)'}}>
+        <StatusDot tone="ok" ping label="uptime 99.98%"/>
+        <StatusDot tone="warn" label="p50 3.8s"/>
+        <StatusDot tone="fault" label="unreachable"/>
+        <StatusDot tone="idle" label="cold"/>
+        <StatusDot tone="live" size={8} ping label="streaming"/>
+      </div>
+      <div className="row" style={{gap:'var(--space-xl)',alignItems:'flex-end'}}>
+        <TokenBudgetBar style={{width:'300px'}} label="context" used={412000} cached={96000} total={1100000}/>
+        <TokenBudgetBar style={{width:'220px'}} label="budget" used={188000} cached={0} total={200000}/>
+      </div>
+      <div className="row" style={{gap:'var(--space-xl)'}}>
+        <MetricPair label="in / out" value="$0.11 / $0.55" unit="/M" tone="telemetry"/>
+        <MetricPair label="ctx" value="1.1M"/>
+        <MetricPair label="p50" value="412" unit="ms"/>
+        <MetricPair label="cache hit" value="41.2%" tone="meta"/>
+        <MetricPair label="errors" value="0.04%" tone="ok" align="right"/>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Card />);
+</script>
+</body></html>
