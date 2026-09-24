@@ -35,9 +35,11 @@ Déclarés dans `bench/config.ts` :
 | ----------- | -------------------------------------- |
 | GPT 6 Terra | cœur de la suite, plus de répétitions  |
 | GPT 6 Sol   | modèle plus cher, moins de répétitions |
-| _à définir_ | 3ᵉ slot optionnel                      |
+| _à définir_ | modèle open-weight multi-hébergeurs    |
 
 Les slugs OpenRouter exacts sont renseignés dans la config. Les endpoints OpenAI exposent les tiers `openai`, `openai/flex` et `openai/fast` ou `openai/priority`, ainsi qu'Azure. Ce sont eux qui rendent le plugin intéressant sur ces modèles.
+
+Le 3ᵉ slot accueille un modèle open-weight servi par beaucoup d'hébergeurs (du type DeepSeek, voir `tests/fixtures/deepseek.endpoints.json`), pour montrer la dispersion d'Auto. Son slug est choisi au dry-run.
 
 ## 4. Configurations comparées
 
@@ -49,15 +51,17 @@ Pour chaque modèle, les configurations sont résolues au lancement à partir de
 | `cheapest` | pin sur le tag au plus petit prix d'entrée (en pratique `openai/flex`) |
 | `fastest`  | pin sur le tier `priority` (`openai/fast` ou `openai/priority`)        |
 | `default`  | pin sur le tag du provider d'origine sans suffixe (`openai`)           |
-| `alt-host` | pin sur un autre hébergeur s'il existe (`azure`)                       |
+| `alt-host` | pin sur l'hébergeur alternatif le moins cher (`azure`)                 |
 
+- Le **provider d'origine** est l'hébergeur dont le tag, sans suffixe, correspond à l'auteur du slug : `openai/…` → `openai`, `deepseek/…` → `deepseek`. S'il n'existe pas, `default` est omise et `alt-host` considère tous les hébergeurs.
+- `alt-host` retient **un seul** tag : le moins cher en entrée parmi ceux dont l'hébergeur n'est pas le provider d'origine (sur la fixture Sol : `azure`, pas `azure/us`). `fetchEndpoints()` dédoublonne déjà les tags listés deux fois.
 - Deux stratégies qui résolvent vers le même tag sont fusionnées.
 - Une stratégie sans candidat (par exemple pas de tier `priority`) est omise et signalée dans le rapport.
 - Les tags `router` et les endpoints sans tag sont ignorés, comme dans le plugin.
 
 ## 5. Workloads
 
-Les prompts sont fixes et versionnés dans `bench/workloads/`. `temperature` est fixe quand le modèle l'accepte, et `max_tokens` est borné pour chaque workload.
+Les prompts sont fixes et versionnés dans `bench/workloads/`. `temperature` est fixe quand le modèle l'accepte, et `max_tokens` est borné pour chaque couple workload × effort (voir ci-dessous).
 
 | id            | Contenu                                                         | Mesure surtout                   |
 | ------------- | --------------------------------------------------------------- | -------------------------------- |
@@ -69,7 +73,22 @@ Les prompts sont fixes et versionnés dans `bench/workloads/`. `temperature` est
 ### Détails
 
 - **`agentic`** : les outils sont mockés de façon déterministe sur un filesystem virtuel. Ce sont `read_file`, `list_dir`, `write_file` et `run_tests`, ce dernier renvoyant une sortie fixe. Les runs restent ainsi comparables. On mesure le nombre de tours, le coût cumulé et le temps total.
-- **`big-context`** : un corpus de code figé est placé dans `bench/fixtures/`. Plusieurs requêtes successives partagent le même préfixe, ce qui permet de mesurer les `cachedTokens`. Un endpoint épinglé garde son prompt cache ; Auto peut changer d'hébergeur et le perdre.
+- **`big-context`** : un corpus de code figé est placé dans `bench/fixtures/`. Une **série** est une suite de requêtes successives d'une même config qui partagent le même préfixe, ce qui permet de mesurer les `cachedTokens`. Un endpoint épinglé garde son prompt cache ; Auto peut changer d'hébergeur et le perdre.
+  - Chaque série commence par un **nonce unique** en tête du préfixe (config × numéro de série). Le 1ᵉʳ appel est donc réellement froid, et aucune config ne profite du cache chauffé par une autre : `auto`, `openai`, `openai/flex` et `openai/fast` partagent probablement le même cache côté OpenAI (même organisation).
+  - Pas de warm-up sur ce workload. Le 1ᵉʳ appel de la série est le « cold », les suivants sont les « cached ».
+
+### Plafond `max_tokens`
+
+Sur les modèles à reasoning, `max_tokens` inclut les tokens de raisonnement. Le plafond est donc fixé par workload × effort, dans `bench/config.ts`. Valeurs de départ, à ajuster après le dry-run :
+
+| workload      | `low` | `medium` | `high` |
+| ------------- | ----- | -------- | ------ |
+| `short`       | 2k    | 4k       | 8k     |
+| `long`        | 4k    | 8k       | 16k    |
+| `agentic`     | —     | 4k/tour  | —      |
+| `big-context` | —     | 4k       | —      |
+
+Une réponse coupée par ce plafond (`finish_reason: length`) prend le statut `truncated` (§7).
 
 ## 6. Axe reasoning
 
@@ -79,33 +98,35 @@ Les niveaux `low`, `medium` et `high` forment une dimension testée. Pour tenir 
 
 Chaque requête est envoyée en streaming SSE avec `usage: { include: true }` et chronométrée avec `performance.now()`.
 
-| Champ              | Définition                                                                                                                            |
-| ------------------ | ------------------------------------------------------------------------------------------------------------------------------------- |
-| `ttftMs`           | délai jusqu'au premier delta portant du texte (raisonnement ou contenu non vide) ; les deltas vides ou limités au `role` sont ignorés |
-| `ttfvtMs`          | délai jusqu'au premier token de contenu visible                                                                                       |
-| `totalMs`          | délai jusqu'à la fin du flux                                                                                                          |
-| `outputTps`        | `completionTokens * 1000 / (tEnd - tFirst)` en tokens/s (`tFirst` = instant du `ttftMs`, horodatages `performance.now()` en ms)       |
-| `promptTokens`     | issu de `usage`                                                                                                                       |
-| `completionTokens` | issu de `usage`                                                                                                                       |
-| `reasoningTokens`  | issu de `usage.completion_tokens_details`                                                                                             |
-| `cachedTokens`     | issu de `usage.prompt_tokens_details`                                                                                                 |
-| `costUsd`          | issu de `usage.cost`                                                                                                                  |
-| `providerUsed`     | hébergeur réel, lu via `GET /api/v1/generation?id=` (indispensable pour Auto)                                                         |
-| `serverLatencyMs`  | `latency` et `generation_time` de `/generation`, pour recouper les mesures locales                                                    |
-| `status`           | `ok`, `http_4xx`, `http_429`, `http_5xx`, `timeout` ou `stream_error`, avec code et message tronqué                                   |
+| Champ              | Définition                                                                                                                                           |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `ttftMs`           | délai jusqu'au premier delta portant du texte (raisonnement ou contenu non vide) ; les deltas vides ou limités au `role` sont ignorés                |
+| `ttfvtMs`          | délai jusqu'au premier token de contenu visible                                                                                                      |
+| `totalMs`          | délai jusqu'à la fin du flux                                                                                                                         |
+| `outputTps`        | `completionTokens * 1000 / (tEnd - tFirst)` en tokens/s (`tFirst` = instant du `ttftMs`, horodatages `performance.now()` en ms)                      |
+| `promptTokens`     | issu de `usage`                                                                                                                                      |
+| `completionTokens` | issu de `usage`                                                                                                                                      |
+| `reasoningTokens`  | issu de `usage.completion_tokens_details`                                                                                                            |
+| `cachedTokens`     | issu de `usage.prompt_tokens_details`                                                                                                                |
+| `costUsd`          | issu de `usage.cost`                                                                                                                                 |
+| `providerUsed`     | hébergeur réel, lu via `GET /api/v1/generation?id=` (indispensable pour Auto), avec retry et backoff car l'entrée n'est pas disponible immédiatement |
+| `serverLatencyMs`  | `latency` et `generation_time` de `/generation`, pour recouper les mesures locales                                                                   |
+| `status`           | `ok`, `truncated`, `http_4xx`, `http_429`, `http_5xx`, `timeout` ou `stream_error`, avec code et message tronqué                                     |
 
 Chaque requête porte aussi ses métadonnées : `runId`, `model`, `config`, `tag`, `effort`, `workload`, `iteration`, `startedAt`.
 
-Pour `agentic`, les métriques sont aussi agrégées par tâche : somme des coûts, temps total et nombre de tours.
+`truncated` (`finish_reason: length`) est compté à part : ces requêtes ne sont ni des succès ni des erreurs, et sont exclues des statistiques de coût et de débit.
+
+Pour `agentic`, les métriques sont aussi agrégées par tâche : somme des coûts, temps total et nombre de tours. `providerUsed` est relevé **à chaque tour** et stocké en liste ; la tâche porte aussi un booléen `providerSwitched` (vrai si Auto a changé d'hébergeur en cours de tâche).
 
 ## 8. Protocole
 
 - **Ordre entrelacé et mélangé** : un round-robin randomisé par une seed répartit les configurations dans le temps, pour que la dérive d'OpenRouter ou des providers pèse de la même façon sur chacune.
-- **Warm-up** : 1 requête par cellule, écartée des résultats.
+- **Warm-up** : 1 requête par cellule, écartée des résultats, sauf pour `big-context` (§5).
 - **Concurrence** : 1 par défaut, pour ne pas biaiser le TTFT. Elle est configurable.
 - **Budget inférieur à 5 $** :
   - `--dry-run` estime le coût de chaque cellule à partir des prix de `/endpoints` et des tokens attendus par workload, sans faire d'appel payant ;
-  - pendant le run, `--max-usd` (5 par défaut) est un plafond strict grâce à une **réservation avant envoi**. Avant chaque requête, le runner réserve son coût maximal : tokens d'entrée × prix d'entrée, plus `max_tokens` × prix de sortie, au tarif le plus cher de la config (pour `auto`, l'endpoint le plus cher du modèle). Il n'envoie la requête que si le coût dépensé, plus les réservations des requêtes en cours, plus cette nouvelle réservation reste sous le plafond. À la fin de la requête, la réservation est remplacée par le `costUsd` réel. Pour `agentic`, la réservation couvre la tâche entière (8 tours × pire cas par tour).
+  - pendant le run, `--max-usd` (5 par défaut) est un plafond strict grâce à une **réservation avant envoi**. Avant chaque requête, le runner réserve son coût maximal : tokens d'entrée × prix d'entrée, plus le plafond `max_tokens` du workload × effort (§5) × prix de sortie, au tarif le plus cher de la config (pour `auto`, l'endpoint le plus cher du modèle). Il n'envoie la requête que si le coût dépensé, plus les réservations des requêtes en cours, plus cette nouvelle réservation reste sous le plafond. À la fin de la requête, la réservation est remplacée par le `costUsd` réel. Pour `agentic`, la réservation couvre la tâche entière (8 tours × pire cas par tour).
 - **Matrice réduite** : la matrice complète (2 modèles × 5 configs × 3 efforts × 4 workloads × n=20) dépasse largement le budget. On retient donc :
   - les 3 niveaux de reasoning seulement pour `short` et `long` ;
   - `agentic` et `big-context` en `medium` seulement ;
@@ -113,7 +134,7 @@ Pour `agentic`, les métriques sont aussi agrégées par tâche : somme des coû
 
   La matrice finale est arbitrée à partir du dry-run.
 
-- **Persistance** : les résultats bruts sont écrits au fil de l'eau dans `bench/results/<runId>.jsonl`, et `--resume` reprend un run interrompu.
+- **Persistance** : les résultats bruts sont écrits au fil de l'eau dans `bench/results/<runId>.jsonl`, et `--resume` reprend un run interrompu. Les JSONL bruts et `summary.json` sont **commités** ensemble, pour que les agrégats restent reproductibles.
 - **Confidentialité** : seules les métriques sont stockées. Ni clé API, ni contenu de réponse.
 
 ## 9. Agrégats et comparaison
@@ -122,11 +143,17 @@ Une cellule correspond à un couple modèle × workload × effort × config. Pou
 
 - la médiane, le p90 et le p95 de `ttftMs`, `totalMs`, `outputTps` et `costUsd`, plus le coût par tâche pour `agentic`. Ces statistiques portent sur les requêtes réussies uniquement. `n` compte les tentatives et `ok` les succès. Une cellule sans aucun succès (par exemple un endpoint épinglé indisponible) a des statistiques `null` et n'apparaît que via son taux de succès et ses erreurs ;
 - un **IC 95 % de la médiane** par bootstrap : 1 000 rééchantillonnages, avec une seed fixe ;
-- le **ratio par rapport à `auto`**, avec son IC par bootstrap sur le ratio des médianes. Un chiffre n'est mis en avant (`headlines`) que si son IC exclut 1 ;
+- le **ratio par rapport à `auto`** pour quatre métriques, chacune avec un IC par bootstrap seedé :
+  - `ttft` et `cost` : ratio des médianes ;
+  - `stability` : ratio des p95/p50 de `ttftMs` ;
+  - `cacheHit` : ratio des `cacheRatio` (`big-context` uniquement).
+
+  Un chiffre n'est mis en avant (`headlines`) que si son IC exclut 1. Avec n=8 (Sol), les IC seront larges et les headlines rares : c'est assumé ;
+
 - la **prévisibilité** : coefficient de variation, IQR, ratio p95/p50, taux de succès ;
-- pour `auto` : la répartition des `providerUsed` et le nombre d'hébergeurs distincts ;
+- pour `auto` : la répartition des `providerUsed` et le nombre d'hébergeurs distincts ; pour `agentic`, la part des tâches où Auto a changé d'hébergeur (`providerSwitchRate`) ;
 - le **cache** : ratio `cachedTokens / promptTokens` sur `big-context`, et « cold vs cached » (coût du 1ᵉʳ appel contre coût médian des suivants) ;
-- le **coût effectif par million de tokens** (entrée, sortie et en cache) : il alimente les cartes KPI et le calculateur d'économies.
+- le **coût effectif par million de tokens** (entrée, sortie et en cache) : il alimente les cartes KPI et le calculateur d'économies. Le prix catalogue du cache vient de `pricing.input_cache_read` (§12) ; il vaut `null` quand l'endpoint ne l'expose pas.
 
 `npm run bench:report` produit aussi un rapport Markdown (tableaux) pour relire les résultats sans le site.
 
@@ -168,6 +195,7 @@ type Cell = {
   tag: string | null; // null pour auto
   n: number; // tentatives (hors warm-up)
   ok: number; // succès ; les stats ci-dessous portent uniquement sur eux
+  truncated: number; // coupées par max_tokens, ni succès ni erreur
   successRate: number; // ok / n
   // null quand ok === 0 : aucune valeur n'est inventée
   ttftMs: Stat | null;
@@ -178,12 +206,20 @@ type Cell = {
   vsAuto?: {
     ttft: number;
     cost: number;
-    ci: { ttft: [number, number]; cost: [number, number] };
+    stability: number; // ratio des p95/p50 de ttftMs
+    cacheHit: number | null; // ratio des cacheRatio, null hors big-context
+    ci: {
+      ttft: [number, number];
+      cost: [number, number];
+      stability: [number, number];
+      cacheHit: [number, number] | null;
+    };
   } | null; // null si la config ou auto n'a aucun succès
   cacheRatio?: number;
   coldVsCached?: { coldUsd: number; cachedUsd: number };
   providers?: Record<string, number>; // auto uniquement : part par hébergeur
-  errors: Record<string, number>;
+  providerSwitchRate?: number; // auto × agentic : part des tâches ayant changé d'hébergeur
+  errors: Record<string, number>; // inclut truncated
 };
 
 type CostModel = {
@@ -191,7 +227,7 @@ type CostModel = {
   config: string;
   inputPerM: number;
   outputPerM: number;
-  cachedPerM: number;
+  cachedPerM: number | null; // null si l'endpoint n'expose pas input_cache_read
 };
 
 type Sample = {
@@ -216,8 +252,8 @@ Elles s'inspirent des maquettes fournies : style terminal sombre, police mono, a
 Quatre tuiles compactes :
 
 - coût médian −X % (meilleur pin contre Auto) ;
-- TTFT médian ;
-- stabilité (CV ou ratio p95/p50) ;
+- TTFT médian (`fastest` contre Auto) ;
+- stabilité (ratio p95/p50 du TTFT) ;
 - taux de cache hit (`big-context`, pin contre Auto).
 
 Chaque tuile porte un sous-titre muted : `vs Auto · <modèle> · n=<n>`.
@@ -275,6 +311,12 @@ Données : `samples[]` et `cells[]`.
 
 ## 12. Feuille de route d'implémentation
 
+Prérequis dans le plugin :
+
+- Étendre `Endpoint` (`rpc.ts`) avec `cached: number | null`, ajouter `input_cache_read` au schéma `RawEndpoint.pricing` et le lire dans `normalize()` (`src/openrouter.ts`) via `perMillion()`. Mettre à jour les fixtures et `tests/openrouter.test.ts`.
+- Ajouter `zod` en dépendance directe : il n'est aujourd'hui que transitif.
+- Ajouter `tsconfig.bench.json`, référencé dans `tsconfig.json`, car `tsconfig.app.json` n'inclut pas `bench/`.
+
 Fichiers prévus :
 
 - `bench/config.ts` : modèles, efforts, matrice, n, budget.
@@ -285,8 +327,8 @@ Fichiers prévus :
 - `bench/stats.ts` (quantiles, bootstrap, CV), `bench/summarize.ts`, `bench/report.ts`, `bench/schema.ts`.
 - `package.json` : scripts `bench`, `bench:summarize` et `bench:report`. `bench/` est inclus dans le typecheck, oxlint et oxfmt.
 - Tests Vitest sur des fixtures, sans appel réel :
-  - `tests/bench-strategies.test.ts` (à partir de `tests/fixtures/gpt-6-sol.endpoints.json`) ;
-  - `tests/bench-client.test.ts` (flux SSE fixture, erreurs 429 et timeout) ;
+  - `tests/bench-strategies.test.ts` (à partir de `tests/fixtures/gpt-6-sol.endpoints.json`, où `alt-host` doit donner `azure`, et de `tests/fixtures/deepseek.endpoints.json`) ;
+  - `tests/bench-client.test.ts` (flux SSE fixture, `finish_reason: length`, erreurs 429 et timeout, retry de `/generation`) ;
   - `tests/bench-stats.test.ts` (quantiles, bootstrap seedé, ratios).
 
 Vérification :
@@ -297,6 +339,5 @@ Vérification :
 
 ## 13. Points ouverts
 
-- Les slugs OpenRouter exacts de GPT 6 Terra et Sol, et le choix du 3ᵉ modèle.
-- La matrice finale, à arbitrer après le premier dry-run.
-- Faut-il commiter les JSONL bruts ou seulement `summary.json` ?
+- Les slugs OpenRouter exacts de GPT 6 Terra et Sol, et celui du modèle multi-hébergeurs.
+- La matrice finale et les plafonds `max_tokens`, à arbitrer après le premier dry-run.
