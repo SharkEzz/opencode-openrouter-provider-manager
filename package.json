@@ -1,0 +1,30 @@
+{
+  "name": "openrouter-provider-manager",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.tsx",
+    "./rpc": "./rpc.ts",
+    "./package.json": "./package.json"
+  },
+  "description": "OpenCode V2 plugin: pin a specific OpenRouter endpoint (e.g. openai/flex) per model",
+  "scripts": {
+    "typecheck": "tsc -p tsconfig.json"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.16",
+    "@opencode/theme": "2.0.16",
+    "@opentui/core": "^0.5.12",
+    "@opentui/solid": "^0.5.12",
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2"
+  },
+  "peerDependencies": {
+    "solid-js": "^1.9.12"
+  },
+  "allowScripts": {
+    "msgpackr-extract@3.0.4": true
+  }
+}
