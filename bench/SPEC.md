@@ -171,6 +171,7 @@ type Summary = {
   costModel: CostModel[]; // $/M effectifs par modèle × config
   profiles: Profile[]; // répartitions de tokens pour le calculateur (§11.3)
   samples: Sample[]; // points bruts allégés pour les distributions
+  observed: Observed | null; // usage réel observé via l'API analytics d'OpenRouter (§11.9)
 };
 
 type Headline = {
@@ -234,11 +235,30 @@ type CostModel = {
 type Profile = {
   id: string; // 'coding-agent', 'chat', 'long-generation'…
   label: string; // libellé anglais affiché sur le site
-  source: 'bench' | 'opencode-history';
+  source: 'bench' | 'opencode-history' | 'openrouter-observed';
   // parts du volume total de tokens, somme = 1 ; reasoning est facturé comme output
   shares: { input: number; cachedInput: number; output: number; reasoning: number };
   n: number; // requêtes ayant servi au calcul
-  period?: { from: string; to: string }; // opencode-history uniquement
+  period?: { from: string; to: string }; // sources historiques uniquement
+};
+
+type Observed = {
+  period: { from: string; to: string }; // 31 jours au plus (limite des percentiles)
+  exportedAt: string;
+  rows: {
+    model: string; // slug sans suffixe de date
+    provider: string; // hébergeur réel
+    requests: number;
+    usageUsd: number;
+    promptTokens: number;
+    cachedTokens: number;
+    completionTokens: number;
+    reasoningTokens: number;
+    ttftP50Ms: number | null;
+    ttftP95Ms: number | null;
+    tpsP50: number | null;
+    cacheHitRate: number | null;
+  }[];
 };
 
 type Sample = {
@@ -256,13 +276,36 @@ type Sample = {
 
 ## 11. Specs d'affichage de la zone benchmark
 
-La zone benchmark suit la **variante 3** des maquettes (« Real-Time Routing Arbitrage »), corrigée pour ne montrer que ce que le plugin fait : style terminal sombre, police mono, accents cyan, bleu et rose, cartes à bord arrondi. Le texte du site est en **anglais** ; les libellés ci-dessous sont indicatifs. Chaque bloc indique les données de `summary.json` qu'il consomme.
+La zone benchmark reprend la structure de la **variante 3** des maquettes (« Real-Time Routing Arbitrage »), corrigée pour ne montrer que ce que le plugin fait. Le style suit le design system **Obsidian Cyber IDE** (`.claude/skills/Obsidian Cyber IDE Design System/`, voir son `README.md`). Le texte du site est en **anglais** ; les libellés ci-dessous sont indicatifs. Chaque bloc indique les données de `summary.json` qu'il consomme.
+
+### 11.0 Application du design system
+
+- **Conteneurs** : pas de « carte » marketing. Tout bloc est un `Panel` : fond plat (`#131313` → `#1b1b1b`), filet de 1px `rgba(255,255,255,.08)`, rayon de 4px, en-tête `label-sm` en majuscules sur une barre de 36px, gouttière de `0.75rem`. Pas d'ombre ni de flou sur ces blocs ; le flou et l'ombre sont réservés aux surfaces flottantes (popovers, tooltips).
+- **Couleurs fonctionnelles**, une seule couleur d'accent par ligne :
+
+  | Usage                 | Couleur                                                |
+  | --------------------- | ------------------------------------------------------ |
+  | Auto (référence)      | muted `#94a3b8`                                        |
+  | Cost, onglet actif    | bleu électrique : fond `#0058be`, texte `#adc6ff`      |
+  | Speed (TTFT, débit)   | cyan : fond `#006970`, texte `#85d3db`                 |
+  | Cache                 | magenta : fond `#9e00b5`, texte `#fbabff`              |
+  | Mieux / neutre / pire | émeraude `#10b981` / ambre `#f59e0b` / rouge `#ef4444` |
+
+  Le magenta ne signale **jamais** un résultat dégradé : il est réservé au cache.
+
+- **Typographie** : Inter 600 en sentence case pour les titres (28/20/16px) ; JetBrains Mono pour tout le reste, avec `font-feature-settings: "tnum" 1, "zero" 1`. Rien sous 11px.
+- **Texte** : minuscules, style CLI, ni « you » ni « we », pas d'emoji. Le point médian sépare des faits de même rang (`openai/flex · ttft p50 1,204ms · n=15`), le tiret cadratin introduit une conséquence. Placeholders terminés par `…`.
+- **Nombres** : unités toujours présentes et abrégées de la même façon (`412ms`, `1.1M`, `96k`, `41.2%`, `$0.11 in / $0.55 out /M`, `82 tok/s`), milliers avec virgule. **Ne jamais arrondir un prix.**
+- **États et animations** : sélection d'un segment en `#0058be` avec texte blanc 600 ; focus par un anneau de 1px `#adc6ff`. Trois durées sur `cubic-bezier(.2,.8,.3,1)` : 90ms (survol), 140ms (boutons, focus), 220ms (largeur des barres). Pas de fondu, pas de rebond, pas de parallaxe.
+- **Composants** : réutiliser `Panel`, `Badge`, `MetricPair`, `StatusDot`, `Kbd`, `Icon` (Lucide) ; la barre de 3px de `TokenBudgetBar` sert de modèle aux barres de comparaison. Le design system ne fournit ni Tabs, ni Select, ni Slider, ni Tooltip : on utilise les primitives **shadcn/ui** (Radix) pour le comportement et l'accessibilité, restylées avec les tokens (§12).
+- **Marque** : pas de logo inventé. Le nom du plugin sert de wordmark, `openrouter-provider-manager` en JetBrains Mono 600.
+- **Piège** : les exemples de texte du design system parlent de fallback (« falling back to @fast ») et d'alias (`@fast`, `@cheap`). Ils décrivent son produit fictif et sont interdits ici (§11.8). On affiche les vrais tags (`openai/flex`, `openai/fast`).
 
 **Message** : le plugin permet de **choisir son compromis** sur un même modèle. Épingler `flex` coûte moins cher mais répond plus lentement ; épingler `fast` répond plus vite mais coûte plus cher. Aucun bloc ne présente un gain sans sa contrepartie.
 
 ### 11.1 En-tête
 
-- Surtitre, titre et sous-titre qui annoncent le compromis coût/vitesse, sans chiffre inventé (ex. « Pick your trade-off: cheaper or faster, same model »).
+- Surtitre `label-sm`, titre en Inter sentence case et sous-titre en mono minuscule, qui annoncent le compromis coût/vitesse sans chiffre inventé (ex. titre « Pick your trade-off », sous-titre `cheaper or faster — same model, one pinned endpoint`).
 - Sous le titre, une ligne muted : `<modèles> · run <date> · commit <sha> · n=<total>` et un lien vers la méthodologie (§11.7).
 
 Données : `run`, `cells[]`.
@@ -291,7 +334,7 @@ Données : `costModel[]`, `profiles[]`.
 
 ### 11.4 Cartes de comparaison
 
-Quatre cartes en grille 2 × 2. Chacune affiche **deux barres horizontales, Auto contre pin**, un badge de ratio coloré selon le sens (vert si c'est mieux, rose si c'est pire) et, en muted, `n=<ok>/<n>` et l'IC 95 %. Si l'IC contient 1, le badge est gris et porte « no significant difference ».
+Quatre `Panel` en grille 2 × 2. Chacun affiche **deux barres horizontales, Auto (muted) contre pin (couleur fonctionnelle de la carte)**, les valeurs en `MetricPair` alignées à droite, un `Badge` de ratio (émeraude si c'est mieux, rouge si c'est pire) et, en muted, `n=<ok>/<n>` et l'IC 95 %. Si l'IC contient 1, le badge est ambre et porte `no significant difference`.
 
 | Carte           | Barres (Auto vs pin)                                                 | Détail sous les barres                                                                                              | Source                               |
 | --------------- | -------------------------------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- | ------------------------------------ |
@@ -314,7 +357,7 @@ Données : `cells[]`, `costModel[]`, `profiles[]`, `samples[]`.
 
 Un tableau par modèle, avec des onglets de tri **Price · TTFT · Throughput · Reliability**.
 
-- Colonnes : tag, prix in et out /M, prix cache /M, contexte, quantization, TTFT p50, tok/s p50, taux de succès (badge vert ou rouge), cache ratio, **Δ vs Auto** (badge coloré).
+- Colonnes : tag, prix in et out /M, prix cache /M, contexte, quantization, TTFT p50, tok/s p50, taux de succès (`StatusDot` émeraude, ambre ou rouge), cache ratio (magenta), **Δ vs Auto** (badge émeraude ou rouge). Rangées de 36px, chiffres alignés à droite.
 - La ligne Auto apparaît en tête, comme dans le picker `/provider`.
 
 Données : `endpoints[]` jointes à `cells[]`.
@@ -339,6 +382,18 @@ Données : `samples[]`, `cells[]`, `run`.
   - intégration MCP, installation via `curl … | bash`, « 280+ endpoints », « 99.99 % uptime », « encrypted routing credentials » ;
   - hébergeurs non mesurés (ex. Bedrock) et chiffres de cache, de ROI ou d'économie non issus de `summary.json`.
 - Les boutons d'appel à l'action pointent vers l'installation du plugin et le dépôt, jamais vers une « activation » de routing.
+- Les données observées (§11.9) ne sont jamais présentées comme une comparaison Auto contre pin.
+
+### 11.9 Usage réel observé
+
+Un bloc séparé, titré « Real-world usage (observed) », montre l'usage OpenCode réel de l'auteur exporté depuis l'API analytics d'OpenRouter. Il est clairement distinct du benchmark contrôlé :
+
+- **Avertissement en tête** : ce sont des observations, pas une expérience. Les prompts, les périodes et la part de requêtes épinglées varient d'un hébergeur à l'autre ; aucune dimension de l'API ne distingue une requête épinglée d'une requête Auto.
+- **Dispersion par hébergeur** : pour chaque modèle servi par plusieurs hébergeurs, une rangée par hébergeur avec requêtes, TTFT p50/p95, tok/s p50 et taux de cache. C'est l'argument le plus direct pour épingler (ex. sur l'export du 2026-09-25 : `z-ai/glm-5.3-flash` servi par 12 hébergeurs, TTFT p50 de 985ms à 15,769ms, cache de 24 % à 98 %).
+- **Profil d'usage** : la part de tokens en cache et de sortie alimente le profil `coding-agent` (source `openrouter-observed`), à recouper avec `opencode-history`.
+- Pas de montant en dollars par hébergeur : il dépend du volume de chacun et n'est pas comparable.
+
+Données : `observed`.
 
 ## 12. Feuille de route d'implémentation
 
@@ -359,7 +414,14 @@ Fichiers prévus :
 - `bench/run.ts` : CLI avec `--dry-run`, `--max-usd`, `--models`, `--workloads`, `--n`, `--seed` et `--resume`.
 - `bench/stats.ts` (quantiles, bootstrap, CV), `bench/summarize.ts`, `bench/report.ts`, `bench/schema.ts`.
 - `bench/profile.ts` : lit l'historique OpenCode **en lecture seule** (`~/.local/share/opencode/opencode.db`, table `message`, messages `assistant` dont `providerID` vaut `openrouter`). Il agrège `tokens.input`, `tokens.cache.read`, `tokens.output` et `tokens.reasoning` sur une période (`--since`), puis écrit `bench/profiles/coding-agent.json` : les parts, n et la période, **rien d'autre** (ni contenu, ni id de session ou de projet, ni chemin). Ce fichier est commité. `tokens.input` exclut déjà les lectures de cache. `bench:summarize` fusionne ce profil avec les profils dérivés des workloads dans `profiles[]`.
-- `package.json` : scripts `bench`, `bench:profile`, `bench:summarize` et `bench:report`. `bench/` est inclus dans le typecheck, oxlint et oxfmt.
+- `bench/observe.ts` : exporte l'usage réel via `POST /api/v1/analytics/query` avec `OPENROUTER_MANAGEMENT_KEY` (clé de management ; la clé d'inférence renvoie 403). Contraintes constatées :
+  - le filtre `app` exige l'**id numérique** (le nom renvoie 500) ; on le retrouve via `/generation?id=` sur une génération de l'app (`app_id`) ;
+  - les percentiles limitent la période à **31 jours** ;
+  - `cache_capture_rate` et `possible_*` ne se combinent pas avec les métriques de coût, de latence ni avec le filtre `app`.
+
+  Sortie : `bench/observed/<date>.json`, commité. Il ne contient que les champs de `Observed` (§10) : ni id d'app, de clé, de session ou de génération.
+
+- `package.json` : scripts `bench`, `bench:profile`, `bench:observe`, `bench:summarize` et `bench:report`. `bench/` est inclus dans le typecheck, oxlint et oxfmt.
 - Tests Vitest sur des fixtures, sans appel réel :
   - `tests/bench-strategies.test.ts` (à partir de `tests/fixtures/gpt-6-sol.endpoints.json`, où `alt-host` doit donner `azure`, et de `tests/fixtures/deepseek.endpoints.json`) ;
   - `tests/bench-client.test.ts` (flux SSE fixture, `finish_reason: length`, erreurs 429 et timeout, retry de `/generation`) ;
@@ -370,7 +432,8 @@ Site (`site/`, dans ce dépôt) :
 
 - **Vite + React + Tailwind + shadcn/ui**, page statique. Il a son propre `package.json` et reste hors du typecheck, de oxlint et des tests du plugin.
 - `bench/results/summary.json` est importé au build et validé par `bench/schema.ts` : un résultat invalide fait échouer le build.
-- Composants shadcn pour les onglets, le slider, les selects, les cartes et les badges ; la bibliothèque de graphiques est à choisir lors de l'implémentation.
+- Design system : `site/` importe `tokens/*.css` depuis `.claude/skills/Obsidian Cyber IDE Design System/` (versionné dans le dépôt) et mappe les tokens en variables CSS du thème Tailwind. Les composants du design system (`Panel`, `Badge`, `MetricPair`, `StatusDot`, `Kbd`, `Icon`) sont portés en TSX.
+- shadcn/ui fournit Tabs, Select, Slider et Tooltip, restylés : rayon de 4px, rangées de 36px, segment sélectionné `#0058be`, focus `#adc6ff`, surfaces flottantes en verre (95 % `#131313`, `blur(16px)`, liseré `rgba(0,88,190,.3)`). La bibliothèque de graphiques est à choisir lors de l'implémentation.
 
 Vérification :
 
@@ -384,3 +447,4 @@ Vérification :
 - La matrice finale et les plafonds `max_tokens`, à arbitrer après le premier dry-run.
 - La période d'historique OpenCode retenue pour le profil `coding-agent`.
 - La bibliothèque de graphiques du site.
+- Le choix des modèles au vu de l'usage observé (§11.9) : les écarts entre hébergeurs sont bien plus forts sur les modèles open-weight que sur les modèles OpenAI.
