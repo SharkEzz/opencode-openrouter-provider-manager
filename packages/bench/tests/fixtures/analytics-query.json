@@ -1,0 +1,63 @@
+{
+  "data": {
+    "data": [
+      {
+        "model": "deepseek/deepseek-v4.1-flash-20260910",
+        "provider": "DeepSeek",
+        "request_count": "3681",
+        "total_usage": 7.95,
+        "tokens_prompt": "956212260",
+        "cached_tokens": "939187584",
+        "tokens_completion": "3224839",
+        "reasoning_tokens": 1677571,
+        "p50_total_time_to_first_token": 2316,
+        "p95_total_time_to_first_token": 3982,
+        "p50_throughput": 117.32152739346984,
+        "cache_hit_rate": 0.982195714579104
+      },
+      {
+        "model": "deepseek/deepseek-v4-pro-20260813",
+        "provider": "Alibaba",
+        "request_count": "995",
+        "total_usage": 15.56,
+        "tokens_prompt": "175220270",
+        "cached_tokens": "171549696",
+        "tokens_completion": "910016",
+        "reasoning_tokens": 519654,
+        "p50_total_time_to_first_token": 2004,
+        "p95_total_time_to_first_token": 5089.499999,
+        "p50_throughput": 49,
+        "cache_hit_rate": 0.98
+      },
+      {
+        "model": "deepseek/deepseek-v4-pro-20260423",
+        "provider": "Alibaba",
+        "request_count": "3",
+        "total_usage": 0.04,
+        "tokens_prompt": "281199",
+        "cached_tokens": null,
+        "tokens_completion": "1274",
+        "reasoning_tokens": null,
+        "p50_total_time_to_first_token": null,
+        "p95_total_time_to_first_token": null,
+        "p50_throughput": null,
+        "cache_hit_rate": null
+      },
+      {
+        "model": "z-ai/glm-5.3-flash-20260826",
+        "provider": null,
+        "request_count": "2",
+        "total_usage": 0.01,
+        "tokens_prompt": "1000",
+        "cached_tokens": "0",
+        "tokens_completion": "10",
+        "reasoning_tokens": 0,
+        "p50_total_time_to_first_token": 900,
+        "p95_total_time_to_first_token": 900,
+        "p50_throughput": 10,
+        "cache_hit_rate": 0
+      }
+    ],
+    "metadata": { "query_time_ms": 12, "row_count": 4, "truncated": false }
+  }
+}

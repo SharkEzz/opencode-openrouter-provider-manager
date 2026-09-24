@@ -1,53 +1,25 @@
 {
-  "name": "openrouter-provider-manager",
-  "version": "0.1.0",
+  "name": "orpm-monorepo",
   "private": true,
-  "description": "OpenCode V2 plugin: pin a specific OpenRouter endpoint (e.g. openai/flex) per model",
-  "license": "MIT",
-  "author": {
-    "name": "SharkEzz",
-    "email": "icraft640@gmail.com",
-    "url": "https://tristandida.fr"
-  },
   "type": "module",
-  "exports": {
-    ".": "./index.ts",
-    "./tui": "./tui.tsx",
-    "./rpc": "./rpc.ts"
-  },
   "scripts": {
-    "typecheck": "tsc -b --noEmit",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "test:coverage": "vitest run --coverage",
+    "typecheck": "pnpm -r --if-present typecheck",
+    "test": "pnpm -r --if-present test",
+    "test:coverage": "pnpm -r --if-present test:coverage",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "lint": "oxlint --fix",
     "lint:check": "oxlint"
   },
   "devDependencies": {
-    "@opencode/plugin": "^2.0.16",
-    "@opencode/theme": "2.0.16",
-    "@opentui/core": "^0.5.12",
-    "@opentui/solid": "^0.5.12",
     "@types/node": "^26.6.2",
-    "@vitest/coverage-v8": "^5.0.1",
     "oxfmt": "^0.70.0",
     "oxlint": "^1.85.0",
     "oxlint-tsgolint": "^7.0.2003",
-    "typescript": "^7.0.2",
-    "vitest": "^5.0.1"
+    "typescript": "^7.0.2"
   },
-  "peerDependencies": {
-    "solid-js": "1.9.12"
+  "engines": {
+    "node": ">=26"
   },
-  "peerDependenciesMeta": {
-    "solid-js": {
-      "optional": true
-    }
-  },
-  "allowScripts": {
-    "msgpackr-extract@3.0.4": true,
-    "fsevents@2.3.3": true
-  }
+  "packageManager": "pnpm@12.6.0"
 }

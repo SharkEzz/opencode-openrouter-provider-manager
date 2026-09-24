@@ -1,0 +1,27 @@
+<!-- @dsCard group="Components" viewport="700x330" name="Command" subtitle="CommandPalette and CommandRow" -->
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{background:var(--surface-app);margin:0;padding:var(--space-lg)}#root{width:100%}.row{display:flex;flex-wrap:wrap;gap:var(--space-lg);align-items:center}.col{display:grid;gap:var(--space-md);align-content:start}.key{font-family:var(--font-mono);font-size:var(--label-sm-size);letter-spacing:var(--label-sm-ls);font-weight:600;text-transform:uppercase;color:var(--text-faint)}</style>
+</head><body><div id="root"></div>
+<script type="text/babel">
+const { CommandPalette, Badge, Icon } = window.ObsidianCyberIDEDesignSystem_fe171d;
+const items=[
+  {id:'a',name:'claude-sonnet-4.6',provider:'anthropic',leading:<Icon name="zap" size={12}/>,cost:'$0.11 in / $0.55 out /M',context:'ctx 1.1M',health:{tone:'ok',label:'99.9%'},alias:'@fast'},
+  {id:'b',name:'gpt-5.2-turbo',provider:'openai',leading:<Icon name="box" size={12}/>,cost:'$0.38 in / $1.20 out /M',context:'ctx 400k',health:{tone:'warn',label:'97.1%'},alias:'@deep'},
+  {id:'c',name:'llama-4-70b',provider:'groq',leading:<Icon name="gauge" size={12}/>,cost:'$0.04 in / $0.08 out /M',context:'ctx 128k',health:{tone:'ok',label:'99.4%'},alias:'@cheap'},
+  {id:'d',name:'qwen3-coder:32b',provider:'ollama · local',leading:<Icon name="terminal" size={12}/>,cost:'free',context:'ctx 64k',health:{tone:'idle',label:'cold'},badges:<Badge tone="meta" style={{marginLeft:'2px'}}>gguf</Badge>}
+];
+function Card(){
+  const [sel,setSel]=React.useState('a');
+  const [q,setQ]=React.useState('');
+  return <CommandPalette query={q} onQueryChange={setQ} selectedId={sel} onSelect={setSel}
+    groups={[{label:'frontier',meta:'3',items:items.slice(0,3)},{label:'local',meta:'1',items:items.slice(3)}]}
+    footer={<><span>↑↓ navigate</span><span>⏎ route</span><span style={{flex:'1 1 auto'}}/><span>4 of 38 providers</span></>}/>;
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Card />);
+</script>
+</body></html>

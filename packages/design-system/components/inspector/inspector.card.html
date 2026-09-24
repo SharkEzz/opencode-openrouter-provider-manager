@@ -1,0 +1,33 @@
+<!-- @dsCard group="Components" viewport="700x270" name="Inspector" subtitle="TreeItem lineage rows with connection status" -->
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{background:var(--surface-app);margin:0;padding:var(--space-lg)}#root{width:100%}.row{display:flex;flex-wrap:wrap;gap:var(--space-lg);align-items:center}.col{display:grid;gap:var(--space-md);align-content:start}.key{font-family:var(--font-mono);font-size:var(--label-sm-size);letter-spacing:var(--label-sm-ls);font-weight:600;text-transform:uppercase;color:var(--text-faint)}</style>
+</head><body><div id="root"></div>
+<script type="text/babel">
+const { TreeItem, Panel, Badge, IconButton, Icon } = window.ObsidianCyberIDEDesignSystem_fe171d;
+function Card(){
+  const [open,setOpen]=React.useState({fs:true,gh:false,pg:true});
+  const t=k=>()=>setOpen(o=>({...o,[k]:!o[k]}));
+  return (
+    <Panel title="mcp registry" meta="3 connected" padded={false} style={{maxWidth:'420px'}}
+      actions={<IconButton label="Refresh" size="sm"><Icon name="refresh-cw" size={12}/></IconButton>}>
+      <TreeItem label="filesystem" expanded={open.fs} onToggle={t('fs')} status="ok" leading={<Icon name="plug" size={12}/>} meta="14 tools">
+        <TreeItem depth={1} label="read_file" leading={<Icon name="file-code" size={12}/>} meta="1.2k"/>
+        <TreeItem depth={1} label="write_file" selected leading={<Icon name="file-code" size={12}/>} meta="840"/>
+        <TreeItem depth={1} label="list_directory" leading={<Icon name="file-code" size={12}/>} meta="96"/>
+      </TreeItem>
+      <TreeItem label="github" expanded={open.gh} onToggle={t('gh')} status="warn" leading={<Icon name="git-branch" size={12}/>} meta="auth expiring"/>
+      <TreeItem label="postgres" expanded={open.pg} onToggle={t('pg')} status="ok" leading={<Icon name="database" size={12}/>} meta="6 tools">
+        <TreeItem depth={1} label="query" leading={<Icon name="terminal" size={12}/>} trailing={<Badge tone="meta">cached</Badge>}/>
+      </TreeItem>
+      <TreeItem label="stripe" status="fault" leading={<Icon name="circle-stop" size={12}/>} meta="unreachable"/>
+    </Panel>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Card />);
+</script>
+</body></html>

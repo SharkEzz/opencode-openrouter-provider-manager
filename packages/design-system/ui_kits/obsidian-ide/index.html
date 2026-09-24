@@ -1,0 +1,75 @@
+<!-- @dsCard group="Obsidian IDE" viewport="1440x900" name="IDE workspace" subtitle="Editor, MCP registry, routing settings, traces — click-through" -->
+<!doctype html>
+<html><head><meta charset="utf-8"><title>Obsidian Cyber IDE</title><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>html,body{height:100%;margin:0;overflow:auto}#root{height:100%;min-width:1180px}</style>
+</head><body><div id="root"></div>
+<script type="text/babel" src="Chrome.jsx"></script>
+<script type="text/babel" src="EditorWorkspace.jsx"></script>
+<script type="text/babel" src="McpRegistry.jsx"></script>
+<script type="text/babel" src="ProviderSettings.jsx"></script>
+<script type="text/babel" src="TraceLog.jsx"></script>
+<script type="text/babel" src="RoutePalette.jsx"></script>
+<script type="text/babel">
+const { Toast, Button, Icon } = window.ObsidianCyberIDEDesignSystem_fe171d;
+
+const TABS = [
+  { id: 'pick', name: 'pick.ts', dirty: true },
+  { id: 'registry', name: 'registry.ts' },
+  { id: 'config', name: 'obsidian.config.jsonc', icon: 'settings-2' }
+];
+
+function App() {
+  const [view, setView] = React.useState('editor');
+  const [tab, setTab] = React.useState('pick');
+  const [palette, setPalette] = React.useState(false);
+  const [model, setModel] = React.useState('claude-sonnet-4.6');
+  const [toasts, setToasts] = React.useState([
+    { id: 1, tone: 'warn', title: 'provider degraded', detail: 'openai us-east p50 3.8s — falling back to @fast', time: '12:04:52', icon: 'triangle-alert' }
+  ]);
+
+  React.useEffect(() => {
+    const onKey = (e) => {
+      if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'p') { e.preventDefault(); setPalette(true); }
+      if (e.key === 'Escape') setPalette(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, []);
+
+  const route = (m) => {
+    setModel(m.name);
+    setPalette(false);
+    setToasts((t) => [{ id: Date.now(), tone: 'ok', title: 'rerouted to ' + (m.alias || m.provider), detail: m.provider + ' · ' + m.name + ' · ' + m.context, time: '12:05:47', icon: 'zap' }, ...t].slice(0, 3));
+  };
+
+  return (
+    <div style={{ position: 'relative', height: '100%', display: 'flex', background: 'var(--surface-app)', overflow: 'hidden' }}>
+      <ActivityRail view={view} onView={setView} />
+      <div style={{ flex: '1 1 auto', minWidth: 0, display: 'flex', flexDirection: 'column' }}>
+        <TitleBar tabs={TABS} activeTab={tab} onTab={setTab} onPalette={() => setPalette(true)} />
+        {view === 'editor' && <EditorWorkspace onPalette={() => setPalette(true)} />}
+        {view === 'mcp' && <McpRegistry />}
+        {view === 'providers' && <ProviderSettings />}
+        {view === 'traces' && <TraceLog />}
+        <StatusBar model={model} />
+      </div>
+      {palette && <RoutePalette onClose={() => setPalette(false)} onRoute={route} />}
+      <div style={{ position: 'absolute', right: 'var(--margin)', bottom: 'calc(var(--bar-status) + var(--margin))', zIndex: 3, display: 'grid', gap: 'var(--space-sm)', justifyItems: 'end' }}>
+        {toasts.map((t) => (
+          <Toast key={t.id} tone={t.tone} title={t.title} detail={t.detail} timestamp={t.time}
+            leading={<Icon name={t.icon} size={14} />}
+            action={t.tone === 'warn' ? <Button size="sm" variant="ghost" onClick={() => setView('traces')}>view trace</Button> : null}
+            onDismiss={() => setToasts((all) => all.filter((x) => x.id !== t.id))} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body></html>

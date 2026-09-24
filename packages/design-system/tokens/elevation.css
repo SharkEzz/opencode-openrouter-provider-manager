@@ -1,0 +1,27 @@
+:root{
+  /* depth is translucency + 1px rims, not diffuse drop shadows */
+  --glass-fill:rgba(19,19,19,.95);
+  --glass-blur:blur(16px); /* @kind other */
+  --glass-rim:1px solid var(--rim-electric);
+  --glass-border:1px solid var(--obs-slate-800);
+
+  --shadow-docked:none;
+  --shadow-float:0 16px 48px rgba(0,0,0,.6);
+  --shadow-toast:0 8px 24px rgba(0,0,0,.5);
+
+  --glow-cyan:0 0 12px var(--obs-cyan-25);
+  --glow-blue:0 0 12px var(--obs-blue-30);
+  --glow-magenta:0 0 12px var(--obs-magenta-20);
+  --focus-ring:0 0 0 1px var(--obs-primary);
+
+  --z-canvas:0; /* @kind other */
+  --z-docked:1; /* @kind other */
+  --z-palette:2; /* @kind other */
+  --z-toast:3; /* @kind other */
+
+  --ease-out:cubic-bezier(.2,.8,.3,1); /* @kind other */
+  --ease-in-out:cubic-bezier(.4,0,.2,1); /* @kind other */
+  --dur-fast:90ms; /* @kind other */
+  --dur:140ms; /* @kind other */
+  --dur-slow:220ms; /* @kind other */
+}

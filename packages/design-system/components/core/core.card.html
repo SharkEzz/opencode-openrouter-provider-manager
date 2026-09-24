@@ -1,0 +1,46 @@
+<!-- @dsCard group="Components" viewport="700x230" name="Core" subtitle="Button, IconButton, Input, Switch, Kbd" -->
+<!doctype html>
+<html><head><meta charset="utf-8"><link rel="stylesheet" href="../../styles.css">
+<script src="https://unpkg.com/react@18.3.1/umd/react.development.js" integrity="sha384-hD6/rw4ppMLGNu3tX5cjIb+uRZ7UkRJ6BPkLpg4hAu/6onKUg4lLsHAs9EBPT82L" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.development.js" integrity="sha384-u6aeetuaXnQ38mYT8rp6sbXaQe3NL9t+IBXmnYxwkUI2Hw4bsp2Wvmx4yRQF1uAm" crossorigin="anonymous"></script>
+<script src="https://unpkg.com/@babel/standalone@7.29.0/babel.min.js" integrity="sha384-m08KidiNqLdpJqLq95G/LEi8Qvjl/xUYll3QILypMoQ65QorJ9Lvtp2RXYGBFj1y" crossorigin="anonymous"></script>
+<script src="../../_ds_bundle.js"></script>
+<style>body{background:var(--surface-app);margin:0;padding:var(--space-lg)}#root{width:100%}.row{display:flex;flex-wrap:wrap;gap:var(--space-lg);align-items:center}.col{display:grid;gap:var(--space-md);align-content:start}.key{font-family:var(--font-mono);font-size:var(--label-sm-size);letter-spacing:var(--label-sm-ls);font-weight:600;text-transform:uppercase;color:var(--text-faint)}</style>
+</head><body><div id="root"></div>
+<script type="text/babel">
+const { Button, IconButton, Input, Switch, Kbd, Icon } = window.ObsidianCyberIDEDesignSystem_fe171d;
+function Card(){
+  const [on,setOn]=React.useState(true);
+  const [q,setQ]=React.useState('claude-sonnet');
+  return (
+    <div className="col" style={{gap:'var(--space-lg)'}}>
+      <div className="row">
+        <Button variant="primary" leading={<Icon name="zap" size={12}/>}>route request</Button>
+        <Button variant="secondary">cancel</Button>
+        <Button variant="ghost" leading={<Icon name="history" size={12}/>}>traces</Button>
+        <Button variant="telemetry" leading={<Icon name="activity" size={12}/>}>live</Button>
+        <Button variant="danger">evict cache</Button>
+        <Button variant="primary" disabled>disabled</Button>
+      </div>
+      <div className="row">
+        <Button size="sm" variant="secondary">sm 24</Button>
+        <Button size="md" variant="secondary">md 28</Button>
+        <Button size="lg" variant="secondary" trailing={<Kbd tone="accent">⏎</Kbd>}>lg 36</Button>
+        <span style={{width:'1px',height:'28px',background:'var(--hairline)'}}/>
+        <IconButton label="Search"><Icon name="search" size={14}/></IconButton>
+        <IconButton label="Split" active><Icon name="columns-2" size={14}/></IconButton>
+        <IconButton label="Settings"><Icon name="settings-2" size={14}/></IconButton>
+        <IconButton label="Close" disabled><Icon name="x" size={14}/></IconButton>
+        <Kbd>ctrl+p</Kbd><Kbd>esc</Kbd>
+      </div>
+      <div className="row" style={{gap:'var(--space-xl)'}}>
+        <Input style={{width:'260px'}} size="md" value={q} onChange={e=>setQ(e.target.value)} leading={<Icon name="search" size={14}/>} trailing={<Kbd>esc</Kbd>}/>
+        <Input style={{width:'150px'}} size="md" invalid value="sk-••••bad" onChange={()=>{}}/>
+        <Switch checked={on} onChange={setOn} label="auto-fallback" hint="retry 429 via secondary"/>
+      </div>
+    </div>
+  );
+}
+ReactDOM.createRoot(document.getElementById('root')).render(<Card />);
+</script>
+</body></html>

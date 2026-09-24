@@ -1,0 +1,33 @@
+:root{
+  /* 4px modular grid */
+  --space-xs:0.25rem;
+  --space-sm:0.5rem;
+  --space-md:0.75rem;
+  --space-lg:1rem;
+  --space-xl:1.5rem;
+  --gutter:0.75rem;   /* strict internal gutter for panels + drawers */
+  --margin:1rem;      /* viewport edge margin for floating surfaces */
+
+  /* radii -- soft-chiseled */
+  --radius-sm:0.125rem;
+  --radius:0.25rem;
+  --radius-md:0.375rem;
+  --radius-lg:0.5rem;
+  --radius-xl:0.75rem;
+  --radius-full:9999px;
+
+  /* density: fixed row heights */
+  --row-dense:28px;   /* code + log rows */
+  --row-item:36px;    /* list / palette item rows */
+  --row-input:44px;   /* search + touch inputs */
+  --bar-toolbar:36px;
+  --bar-status:24px;
+
+  /* fixed widths */
+  --palette-min:640px;
+  --palette-max:720px;
+  --sidebar-width:248px;
+  --inspector-width:296px;
+  --track-progress:3px;
+  --track-switch:14px;
+}

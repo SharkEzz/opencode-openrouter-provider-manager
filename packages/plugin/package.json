@@ -1,0 +1,49 @@
+{
+  "name": "openrouter-provider-manager",
+  "version": "0.1.0",
+  "private": true,
+  "description": "OpenCode V2 plugin: pin a specific OpenRouter endpoint (e.g. openai/flex) per model",
+  "license": "MIT",
+  "author": {
+    "name": "SharkEzz",
+    "email": "icraft640@gmail.com",
+    "url": "https://tristandida.fr"
+  },
+  "type": "module",
+  "exports": {
+    ".": "./index.ts",
+    "./tui": "./tui.tsx",
+    "./rpc": "./rpc.ts",
+    "./openrouter": "./src/openrouter.ts",
+    "./pin": "./src/pin.ts"
+  },
+  "scripts": {
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:coverage": "vitest run --coverage"
+  },
+  "dependencies": {
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.16",
+    "@opencode/schema": "2.0.16",
+    "@opencode/theme": "2.0.16",
+    "@opentui/core": "^0.5.12",
+    "@opentui/solid": "^0.5.12",
+    "@types/node": "^26.6.2",
+    "@vitest/coverage-v8": "^5.0.1",
+    "effect": "4.0.0-rc.112",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
+  },
+  "peerDependencies": {
+    "solid-js": "1.9.12"
+  },
+  "peerDependenciesMeta": {
+    "solid-js": {
+      "optional": true
+    }
+  }
+}
