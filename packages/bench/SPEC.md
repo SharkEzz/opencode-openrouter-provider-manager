@@ -43,17 +43,19 @@ Les slugs sont vérifiés au dry-run (§13). Les deux modèles open-weight coût
 
 Pour chaque modèle, les configurations sont résolues au lancement à partir de `/models/{id}/endpoints` et du dernier export observé (`observed/<date>.json`, §12) :
 
-| id           | Requête envoyée                                                                                                                      |
-| ------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `auto`       | corps inchangé : c'est la référence                                                                                                  |
-| `cheapest`   | pin sur le tag au plus petit prix d'entrée (sur `gpt-6-sol`, en pratique `openai/flex`)                                              |
-| `fastest`    | pin sur le tier `priority` s'il existe (`openai/fast`, `openai/priority`) ; sinon sur l'hébergeur au plus petit TTFT p50 **observé** |
-| `best-cache` | pin sur l'hébergeur au meilleur `cacheHitRate` **observé**                                                                           |
-| `default`    | pin sur le tag du provider d'origine sans suffixe (`openai`, `deepseek`, `z-ai`)                                                     |
-| `alt-host`   | pin sur l'hébergeur alternatif le moins cher (`azure` sur `gpt-6-sol`)                                                               |
+| id           | Requête envoyée                                                                                                                           |
+| ------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| `auto`       | corps inchangé : c'est la référence                                                                                                       |
+| `cheapest`   | pin sur le tag au plus petit **coût pondéré** par le profil `coding-agent` (voir ci-dessous ; sur `gpt-6-sol`, en pratique `openai/flex`) |
+| `fastest`    | pin sur le tier `priority` s'il existe (`openai/fast`, `openai/priority`) ; sinon sur l'hébergeur au plus petit TTFT p50 **observé**      |
+| `best-cache` | pin sur l'hébergeur au meilleur `cacheHitRate` **observé**                                                                                |
+| `default`    | pin sur le tag du provider d'origine sans suffixe (`openai`, `deepseek`, `z-ai`)                                                          |
+| `alt-host`   | pin sur l'hébergeur alternatif le moins cher (`azure` sur `gpt-6-sol`)                                                                    |
 
 - Le **provider d'origine** est l'hébergeur dont le tag, sans suffixe, correspond à l'auteur du slug : `openai/…` → `openai`, `deepseek/…` → `deepseek`, `z-ai/…` → `z-ai`. S'il n'existe pas, `default` est omise et `alt-host` considère tous les hébergeurs.
-- `alt-host` retient **un seul** tag : le moins cher en entrée parmi ceux dont l'hébergeur n'est pas le provider d'origine (sur la fixture Sol : `azure`, pas `azure/us`). `fetchEndpoints()` dédoublonne déjà les tags listés deux fois.
+- **Coût pondéré** d'un endpoint : `Σ(part du profil × prix /M)` avec les parts du profil `coding-agent` (§10, `Profile`) : entrée non cachée × prix d'entrée, entrée en cache × prix du cache (`cached`, ou prix d'entrée s'il vaut `null`), sortie et raisonnement × prix de sortie. C'est le calcul du calculateur (§11.3). Le prix d'entrée seul trompe sur un agent de code, où l'usage observé montre 94.4 % de l'entrée lue en cache : un hébergeur cher en entrée mais bon marché en cache peut être le moins cher réel. Sans profil disponible, `cheapest` retombe sur le prix d'entrée, et le rapport le signale. Un endpoint dont un prix nécessaire est inconnu (`null`) n'est pas candidat.
+- **Remises** : `/endpoints` expose un champ `discount` (ex. 0.3, 0.5). D'après la doc OpenRouter (`discount_to_user`), les prix publiés sont **déjà remisés** ; `discount` n'est qu'informatif et n'est jamais appliqué une seconde fois. Le mini-run (§12) le vérifie en comparant le coût estimé à `usage.cost`.
+- `alt-host` retient **un seul** tag : le moins cher en coût pondéré parmi ceux dont l'hébergeur n'est pas le provider d'origine (sur la fixture Sol : `azure`, pas `azure/us`). `fetchEndpoints()` dédoublonne déjà les tags listés deux fois.
 - **Stratégies issues de l'observé** (`fastest` sans tier priority, `best-cache`) :
   - seuls comptent les hébergeurs avec au moins **50 requêtes** dans l'export, pour ne pas choisir sur un échantillon minuscule ;
   - l'hébergeur observé (`provider`, nom affiché) est rapproché d'un tag de `/endpoints` via `provider_name` ; sans correspondance, la stratégie est omise ;
@@ -439,17 +441,17 @@ Site (`apps/site/`, paquet `@orpm/site`) :
 - **Vite + React + Tailwind + shadcn/ui**, page statique, avec ses propres scripts de typecheck et de test, lancés par les scripts racine.
 - `packages/bench/results/summary.json` est importé au build via la dépendance `@orpm/bench` (`workspace:*`) et validé par son `schema.ts` : un résultat invalide fait échouer le build.
 - Design system : le site dépend de `@orpm/design-system` (`packages/design-system/`, `workspace:*`), importe ses `tokens/*.css` et mappe les tokens en variables CSS du thème Tailwind. Le skill `.claude/skills/Obsidian Cyber IDE Design System/` ne fait que renvoyer vers ce paquet. Les composants du design system (`Panel`, `Badge`, `MetricPair`, `StatusDot`, `Kbd`, `Icon`) sont portés en TSX.
-- shadcn/ui fournit Tabs, Select, Slider et Tooltip, restylés : rayon de 4px, rangées de 36px, segment sélectionné `#0058be`, focus `#adc6ff`, surfaces flottantes en verre (95 % `#131313`, `blur(16px)`, liseré `rgba(0,88,190,.3)`). La bibliothèque de graphiques est à choisir lors de l'implémentation.
+- shadcn/ui fournit Tabs, Select, Slider et Tooltip, restylés : rayon de 4px, rangées de 36px, segment sélectionné (`--surface-selected`), focus (`--focus-ring`), surfaces flottantes en verre (`--glass-fill`, `--glass-blur`, `--glass-border`).
+- Graphiques : **Recharts**, via la couche chart de shadcn (`ChartContainer`, couleurs en variables CSS). Nuage coût × TTFT avec `ScatterChart` + `ErrorBar` (direction `x`), sparkline avec `LineChart`, strip plots avec `Scatter` décalé. Animations désactivées (`isAnimationActive={false}`) pour respecter les règles de mouvement du design system ; graduations et infobulles personnalisées en JetBrains Mono tabulaire. Pas de box plot (le strip plot suffit). Les barres Auto vs pin des cartes (§11.4) restent de simples éléments HTML sur le modèle de `TokenBudgetBar`.
 
 Vérification :
 
 1. `pnpm typecheck && pnpm test && pnpm lint:check && pnpm format:check` à la racine.
 2. `pnpm --filter @orpm/bench bench --dry-run` : matrice résolue et coût estimé inférieur à 5 $, sans appel payant.
-3. Un mini-run réel (`--n 1 --workloads short --max-usd 0.10`), puis `bench:summarize` et `bench:report`. Ce run se fait uniquement avec accord, car il consomme des crédits.
+3. Un mini-run réel (`--n 1 --workloads short --max-usd 0.10`), puis `bench:summarize` et `bench:report`. Ce run se fait uniquement avec accord, car il consomme des crédits. Il vérifie aussi que le coût estimé à partir des prix publiés correspond à `usage.cost` (écart attendu inférieur à 1 %), ce qui confirme que les remises sont déjà incluses.
 
 ## 13. Points ouverts
 
 - Les slugs OpenRouter exacts de `glm-5.3-flash`, `deepseek-v4.1-flash` et `gpt-6-sol`, à vérifier au dry-run.
 - La matrice finale et les plafonds `max_tokens`, à arbitrer après le premier dry-run.
 - La période d'historique OpenCode retenue pour le profil `coding-agent`.
-- La bibliothèque de graphiques du site.
