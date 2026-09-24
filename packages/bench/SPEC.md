@@ -250,6 +250,7 @@ type EndpointSnapshot = {
   quantization: string | null;
   status: number;
   uptime: number | null;
+  reasoning: boolean;
 };
 
 type CostModel = {

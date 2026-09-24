@@ -8691,7 +8691,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "z-ai/glm-5.3-flash",
@@ -8704,7 +8705,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "z-ai/glm-5.3-flash",
@@ -8717,7 +8719,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "z-ai/glm-5.3-flash",
@@ -8730,7 +8733,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "deepseek/deepseek-v4.1-flash",
@@ -8743,7 +8747,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "deepseek/deepseek-v4.1-flash",
@@ -8756,7 +8761,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "deepseek/deepseek-v4.1-flash",
@@ -8769,7 +8775,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "deepseek/deepseek-v4.1-flash",
@@ -8782,7 +8789,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "openai/gpt-6-sol",
@@ -8795,7 +8803,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "openai/gpt-6-sol",
@@ -8808,7 +8817,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "openai/gpt-6-sol",
@@ -8821,7 +8831,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     },
     {
       "model": "openai/gpt-6-sol",
@@ -8834,7 +8845,8 @@
       "context": 1048576,
       "quantization": null,
       "status": 0,
-      "uptime": 99.5
+      "uptime": 99.5,
+      "reasoning": true
     }
   ],
   "costModel": [

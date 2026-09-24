@@ -64,6 +64,7 @@ const endpoint = (
   quantization: null,
   status: 0,
   uptime: 99.5,
+  reasoning: true,
 });
 
 const auto = (spread = 0.5): Config => ({
@@ -177,7 +178,8 @@ function rng(seed: number) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
   };
 }
-const random = rng(SEED);
+// Reset by fakeSummary() so every call replays the same sequence from SEED.
+let random = rng(SEED);
 /** Log-normal multiplier with median 1 (Box–Muller). */
 function logNormal(sigma: number) {
   const u = Math.max(random(), 1e-12);
@@ -225,6 +227,7 @@ function latestObserved(): Observed | null {
 }
 
 export function fakeSummary(observed: Observed | null): Summary {
+  random = rng(SEED);
   const cells: Cell[] = [];
   const samples: Sample[] = [];
   let clock = 0;

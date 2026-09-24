@@ -96,6 +96,9 @@ describe('fakeSummary', () => {
     expect(summary.observed).toEqual(observed);
     expect(summary.profiles[0]?.id).toBe('coding-agent');
   });
+  it('is reproducible: every call replays the same seeded sequence', () => {
+    expect(fakeSummary(observed)).toEqual(fakeSummary(observed));
+  });
   it('only headlines ratios whose interval excludes 1', () => {
     for (const headline of fakeSummary(null).headlines)
       expect(headline.ci[0] > 1 || headline.ci[1] < 1).toBe(true);

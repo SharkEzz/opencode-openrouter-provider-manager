@@ -145,6 +145,7 @@ export const EndpointSnapshot = z.strictObject({
   quantization: z.string().nullable(),
   status: z.number(),
   uptime: z.number().nullable(),
+  reasoning: z.boolean(),
 });
 
 export const CostModel = z.strictObject({
