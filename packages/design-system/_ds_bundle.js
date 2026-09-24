@@ -1,4 +1,4 @@
-/* @ds-bundle: {"format":4,"namespace":"ObsidianCyberIDEDesignSystem_fe171d","components":[{"name":"CommandPalette","sourcePath":"components/command/CommandPalette.jsx"},{"name":"CommandRow","sourcePath":"components/command/CommandRow.jsx"},{"name":"Button","sourcePath":"components/core/Button.jsx"},{"name":"IconButton","sourcePath":"components/core/IconButton.jsx"},{"name":"Input","sourcePath":"components/core/Input.jsx"},{"name":"Kbd","sourcePath":"components/core/Kbd.jsx"},{"name":"Panel","sourcePath":"components/core/Panel.jsx"},{"name":"Switch","sourcePath":"components/core/Switch.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"ICON_BASE","sourcePath":"components/icon/Icon.jsx"},{"name":"Icon","sourcePath":"components/icon/Icon.jsx"},{"name":"TreeItem","sourcePath":"components/inspector/TreeItem.jsx"},{"name":"Badge","sourcePath":"components/telemetry/Badge.jsx"},{"name":"MetricPair","sourcePath":"components/telemetry/MetricPair.jsx"},{"name":"StatusDot","sourcePath":"components/telemetry/StatusDot.jsx"},{"name":"TokenBudgetBar","sourcePath":"components/telemetry/TokenBudgetBar.jsx"}],"sourceHashes":{"components/command/CommandPalette.jsx":"5f0f36f31c3f","components/command/CommandRow.jsx":"1c5b67a55f56","components/core/Button.jsx":"c3206d928397","components/core/IconButton.jsx":"bcadbb640135","components/core/Input.jsx":"0ce1a7e9b9b1","components/core/Kbd.jsx":"8ad495c22cb5","components/core/Panel.jsx":"29a5d9668e29","components/core/Switch.jsx":"2f2eb22878cb","components/feedback/Toast.jsx":"6f051415454b","components/icon/Icon.jsx":"8f5fb8254ce1","components/inspector/TreeItem.jsx":"8a015fe5a97a","components/telemetry/Badge.jsx":"7b1500235357","components/telemetry/MetricPair.jsx":"71d852f952b5","components/telemetry/StatusDot.jsx":"94962f75af19","components/telemetry/TokenBudgetBar.jsx":"9275f59076ae","ui_kits/obsidian-ide/Chrome.jsx":"1b41b91a13ea","ui_kits/obsidian-ide/EditorWorkspace.jsx":"840fe9005c19","ui_kits/obsidian-ide/McpRegistry.jsx":"cd8c9e7044ce","ui_kits/obsidian-ide/ProviderSettings.jsx":"48b9da7a9195","ui_kits/obsidian-ide/RoutePalette.jsx":"d7e60b16c27a","ui_kits/obsidian-ide/TraceLog.jsx":"3a3f129609cb"},"inlinedExternals":[],"unexposedExports":[]} */
+/* @ds-bundle: {"format":4,"namespace":"ObsidianCyberIDEDesignSystem_fe171d","components":[{"name":"CommandPalette","sourcePath":"components/command/CommandPalette.jsx"},{"name":"CommandRow","sourcePath":"components/command/CommandRow.jsx"},{"name":"Button","sourcePath":"components/core/Button.jsx"},{"name":"IconButton","sourcePath":"components/core/IconButton.jsx"},{"name":"Input","sourcePath":"components/core/Input.jsx"},{"name":"Kbd","sourcePath":"components/core/Kbd.jsx"},{"name":"Panel","sourcePath":"components/core/Panel.jsx"},{"name":"Switch","sourcePath":"components/core/Switch.jsx"},{"name":"Toast","sourcePath":"components/feedback/Toast.jsx"},{"name":"ICON_BASE","sourcePath":"components/icon/Icon.jsx"},{"name":"Icon","sourcePath":"components/icon/Icon.jsx"},{"name":"TreeItem","sourcePath":"components/inspector/TreeItem.jsx"},{"name":"Badge","sourcePath":"components/telemetry/Badge.jsx"},{"name":"MetricPair","sourcePath":"components/telemetry/MetricPair.jsx"},{"name":"StatusDot","sourcePath":"components/telemetry/StatusDot.jsx"},{"name":"TokenBudgetBar","sourcePath":"components/telemetry/TokenBudgetBar.jsx"}],"sourceHashes":{"components/command/CommandPalette.jsx":"5f0f36f31c3f","components/command/CommandRow.jsx":"1c5b67a55f56","components/core/Button.jsx":"c3206d928397","components/core/IconButton.jsx":"bcadbb640135","components/core/Input.jsx":"0ce1a7e9b9b1","components/core/Kbd.jsx":"8ad495c22cb5","components/core/Panel.jsx":"29a5d9668e29","components/core/Switch.jsx":"2f2eb22878cb","components/feedback/Toast.jsx":"6f051415454b","components/icon/Icon.jsx":"8f5fb8254ce1","components/inspector/TreeItem.jsx":"8a015fe5a97a","components/telemetry/Badge.jsx":"7b1500235357","components/telemetry/MetricPair.jsx":"71d852f952b5","components/telemetry/StatusDot.jsx":"94962f75af19","components/telemetry/TokenBudgetBar.jsx":"9275f59076ae","ui_kits/obsidian-ide/Chrome.jsx":"36458b07e7ce","ui_kits/obsidian-ide/EditorWorkspace.jsx":"840fe9005c19","ui_kits/obsidian-ide/McpRegistry.jsx":"cd8c9e7044ce","ui_kits/obsidian-ide/ProviderSettings.jsx":"48b9da7a9195","ui_kits/obsidian-ide/RoutePalette.jsx":"9d7e3830d604","ui_kits/obsidian-ide/TraceLog.jsx":"3a3f129609cb"},"inlinedExternals":[],"unexposedExports":[]} */
 
 (() => {
 
@@ -1524,7 +1524,9 @@ function TitleBar({
   tabs,
   activeTab,
   onTab,
-  onPalette
+  onPalette,
+  theme,
+  onToggleTheme
 }) {
   return /*#__PURE__*/React.createElement("header", {
     style: {
@@ -1620,6 +1622,12 @@ function TitleBar({
   }, /*#__PURE__*/React.createElement(Badge, {
     tone: "route"
   }, "@fast"), /*#__PURE__*/React.createElement(IconButton, {
+    label: theme === 'light' ? 'Switch to dark' : 'Switch to light',
+    onClick: onToggleTheme
+  }, /*#__PURE__*/React.createElement(Icon, {
+    name: theme === 'light' ? 'moon' : 'sun',
+    size: 14
+  })), /*#__PURE__*/React.createElement(IconButton, {
     label: "Split editor"
   }, /*#__PURE__*/React.createElement(Icon, {
     name: "columns-2",
@@ -3002,7 +3010,9 @@ function RoutePalette({
       position: 'absolute',
       inset: 0,
       zIndex: 2,
-      background: 'rgba(0,0,0,.5)',
+      background: 'var(--scrim-bg)',
+      backdropFilter: 'var(--scrim-blur)',
+      WebkitBackdropFilter: 'var(--scrim-blur)',
       display: 'flex',
       justifyContent: 'center',
       alignItems: 'flex-start',

@@ -32,7 +32,7 @@ function RoutePalette({ onClose, onRoute, selected }) {
   return (
     <div
       onClick={onClose}
-      style={{ position: 'absolute', inset: 0, zIndex: 2, background: 'rgba(0,0,0,.5)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 'calc(var(--margin) * 4) var(--margin) var(--margin)' }}
+      style={{ position: 'absolute', inset: 0, zIndex: 2, background: 'var(--scrim-bg)', backdropFilter: 'var(--scrim-blur)', WebkitBackdropFilter: 'var(--scrim-blur)', display: 'flex', justifyContent: 'center', alignItems: 'flex-start', padding: 'calc(var(--margin) * 4) var(--margin) var(--margin)' }}
     >
       <div onClick={(e) => e.stopPropagation()} style={{ width: '100%', maxWidth: 'var(--palette-max)' }}>
         <CommandPalette

@@ -283,23 +283,27 @@ La zone benchmark reprend la structure de la **variante 3** des maquettes (« Re
 
 ### 11.0 Application du design system
 
-- **Conteneurs** : pas de « carte » marketing. Tout bloc est un `Panel` : fond plat (`#131313` → `#1b1b1b`), filet de 1px `rgba(255,255,255,.08)`, rayon de 4px, en-tête `label-sm` en majuscules sur une barre de 36px, gouttière de `0.75rem`. Pas d'ombre ni de flou sur ces blocs ; le flou et l'ombre sont réservés aux surfaces flottantes (popovers, tooltips).
+- **Thèmes** : sombre (par défaut du design system) et clair (`tokens/theme-light.css`, activé par `data-theme="light"` sur `<html>`). Le code du site ne lit que les alias sémantiques (`--surface-*`, `--text-*`, `--accent-*-ink`, `--status-*`…), jamais une valeur `--obs-*` ni un hexadécimal : les deux thèmes fonctionnent alors sans code spécifique. Les valeurs ci-dessous sont celles du thème sombre ; le thème clair les remplace via le même alias.
+  - **Bascule** : un bouton (`IconButton` soleil/lune) dans l'en-tête du site. À la première visite, le thème suit `prefers-color-scheme` ; un clic l'impose et le choix est mémorisé dans `localStorage`. Le thème est appliqué avant le premier rendu (script inline dans `<head>`) pour éviter un flash du mauvais thème.
+  - **Graphiques** : les couleurs des séries et des axes passent par les mêmes alias, pour que Recharts suive la bascule sans rechargement.
+  - En clair, le fond de page porte le dégradé `--app-gradient` (seul dégradé autorisé, au niveau de la page uniquement), et le verre des surfaces flottantes est plus transparent et plus flou.
+- **Conteneurs** : pas de « carte » marketing. Tout bloc est un `Panel` : fond plat (`--surface-docked`, `#1b1b1b` en sombre), filet de 1px (`--hairline`), rayon de 4px, en-tête `label-sm` en majuscules sur une barre de 36px, gouttière de `0.75rem`. Pas d'ombre ni de flou sur ces blocs ; le flou et l'ombre sont réservés aux surfaces flottantes (popovers, tooltips).
 - **Couleurs fonctionnelles**, une seule couleur d'accent par ligne :
 
-  | Usage                 | Couleur                                                |
-  | --------------------- | ------------------------------------------------------ |
-  | Auto (référence)      | muted `#94a3b8`                                        |
-  | Cost, onglet actif    | bleu électrique : fond `#0058be`, texte `#adc6ff`      |
-  | Speed (TTFT, débit)   | cyan : fond `#006970`, texte `#85d3db`                 |
-  | Cache                 | magenta : fond `#9e00b5`, texte `#fbabff`              |
-  | Mieux / neutre / pire | émeraude `#10b981` / ambre `#f59e0b` / rouge `#ef4444` |
+  | Usage                 | Alias                                              | Sombre                            | Clair                             |
+  | --------------------- | -------------------------------------------------- | --------------------------------- | --------------------------------- |
+  | Auto (référence)      | `--text-muted`                                     | `#94a3b8`                         | `#5b6373`                         |
+  | Cost, onglet actif    | `--accent-route-ink` (fond `#0058be`)              | texte `#adc6ff`                   | texte `#0058be`                   |
+  | Speed (TTFT, débit)   | `--accent-telemetry-ink` (fond `#006970`)          | texte `#85d3db`                   | texte `#00707a`                   |
+  | Cache                 | `--accent-meta-ink` (fond `#9e00b5`)               | texte `#fbabff`                   | texte `#8a0099`                   |
+  | Mieux / neutre / pire | `--status-ok` / `--status-warn` / `--status-fault` | `#10b981` / `#f59e0b` / `#ef4444` | `#047857` / `#a15c07` / `#b91c1c` |
 
   Le magenta ne signale **jamais** un résultat dégradé : il est réservé au cache.
 
 - **Typographie** : Inter 600 en sentence case pour les titres (28/20/16px) ; JetBrains Mono pour tout le reste, avec `font-feature-settings: "tnum" 1, "zero" 1`. Rien sous 11px.
 - **Texte** : minuscules, style CLI, ni « you » ni « we », pas d'emoji. Le point médian sépare des faits de même rang (`openai/flex · ttft p50 1,204ms · n=15`), le tiret cadratin introduit une conséquence. Placeholders terminés par `…`.
 - **Nombres** : unités toujours présentes et abrégées de la même façon (`412ms`, `1.1M`, `96k`, `41.2%`, `$0.11 in / $0.55 out /M`, `82 tok/s`), milliers avec virgule. **Ne jamais arrondir un prix.**
-- **États et animations** : sélection d'un segment en `#0058be` avec texte blanc 600 ; focus par un anneau de 1px `#adc6ff`. Trois durées sur `cubic-bezier(.2,.8,.3,1)` : 90ms (survol), 140ms (boutons, focus), 220ms (largeur des barres). Pas de fondu, pas de rebond, pas de parallaxe.
+- **États et animations** : sélection d'un segment en `#0058be` avec texte blanc 600 ; focus par un anneau de 1px (`--focus-ring`). Trois durées sur `cubic-bezier(.2,.8,.3,1)` : 90ms (survol), 140ms (boutons, focus), 220ms (largeur des barres). Pas de fondu, pas de rebond, pas de parallaxe.
 - **Composants** : réutiliser `Panel`, `Badge`, `MetricPair`, `StatusDot`, `Kbd`, `Icon` (Lucide) ; la barre de 3px de `TokenBudgetBar` sert de modèle aux barres de comparaison. Le design system ne fournit ni Tabs, ni Select, ni Slider, ni Tooltip : on utilise les primitives **shadcn/ui** (Radix) pour le comportement et l'accessibilité, restylées avec les tokens (§12).
 - **Marque** : pas de logo inventé. Le nom du plugin sert de wordmark, `openrouter-provider-manager` en JetBrains Mono 600.
 - **Piège** : les exemples de texte du design system parlent de fallback (« falling back to @fast ») et d'alias (`@fast`, `@cheap`). Ils décrivent son produit fictif et sont interdits ici (§11.8). On affiche les vrais tags (`openai/flex`, `openai/fast`).
