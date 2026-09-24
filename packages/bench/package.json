@@ -3,7 +3,18 @@
   "version": "0.0.0",
   "private": true,
   "type": "module",
+  "scripts": {
+    "bench:observe": "node observe.ts",
+    "typecheck": "tsc --noEmit",
+    "test": "vitest run"
+  },
   "dependencies": {
-    "openrouter-provider-manager": "workspace:*"
+    "openrouter-provider-manager": "workspace:*",
+    "zod": "^4.1.8"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.2",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.1"
   }
 }

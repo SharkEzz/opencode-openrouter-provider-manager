@@ -246,10 +246,11 @@ type Profile = {
 };
 
 type Observed = {
-  period: { from: string; to: string }; // 31 jours au plus (limite des percentiles)
+  period: { from: string; to: string }; // dates UTC, `to` exclu ; 31 jours au plus (limite des percentiles)
   exportedAt: string;
   rows: {
     model: string; // slug sans suffixe de date
+    permaslug: string; // slug daté exact : deux versions d'un modèle restent des lignes distinctes
     provider: string; // hébergeur réel
     requests: number;
     usageUsd: number;
