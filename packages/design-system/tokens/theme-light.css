@@ -1,0 +1,69 @@
+/* Light theme: opt in with [data-theme="light"] on any ancestor element.
+   Overrides the semantic aliases only -- raw --obs-* tokens and component code never change,
+   so every existing component re-themes automatically. Glass surfaces get more transparency
+   and blur than the dark theme; the app background carries a soft two-colour gradient bloom
+   instead of a flat fill. */
+[data-theme="light"]{
+  --surface-canvas:#ffffff;
+  --surface-app:#f3f5f8;
+  --surface-docked:#ffffff;
+  --surface-pane:#ffffff;
+  --surface-raised:#eef1f5;
+  --surface-input:#ffffff;
+  --surface-hover:rgba(15,23,42,.045);
+  --surface-active:rgba(15,23,42,.08);
+  --surface-selected-tint:#e6edfb;
+
+  --text-primary:#14161c;
+  --text-secondary:#454b5c;
+  --text-muted:#5b6373;
+  --text-faint:#7a8195;
+  --text-inverse:#f4f5f7;
+  --text-link:#0058be;
+  --text-link-hover:#003d85;
+
+  --hairline:rgba(15,23,42,.08);
+  --border-subtle:rgba(15,23,42,.06);
+  --border-strong:rgba(15,23,42,.16);
+  --border-input:rgba(15,23,42,.18);
+  --border-focus:#0058be;
+  --rim-electric:rgba(0,88,190,.4);
+
+  --accent-route-ink:#0058be;
+  --accent-telemetry-ink:#00707a;
+  --accent-meta-ink:#8a0099;
+
+  --status-ok:#047857;
+  --status-warn:#a15c07;
+  --status-fault:#b91c1c;
+  --status-idle:#64748b;
+
+  --syntax-plain:#1c2030;
+  --syntax-comment:#7a8195;
+  --syntax-keyword:#8a0099;
+  --syntax-string:#00707a;
+  --syntax-fn:#0058be;
+  --syntax-number:#a15c07;
+  --syntax-type:#045f66;
+  --syntax-gutter:#a7adba;
+
+  /* more visible blur + transparency than dark's instrument-panel glass */
+  --glass-fill:rgba(255,255,255,.66);
+  --glass-blur:blur(28px); /* @kind other */
+  --glass-border:1px solid rgba(15,23,42,.10); /* @kind color */
+  --shadow-float:0 20px 56px rgba(30,41,59,.16);
+  --shadow-toast:0 10px 28px rgba(30,41,59,.13);
+  --glow-cyan:0 0 14px rgba(0,112,122,.35);
+  --glow-blue:0 0 14px rgba(0,88,190,.35);
+  --glow-magenta:0 0 14px rgba(138,0,153,.3);
+  --focus-ring:0 0 0 1px #0058be;
+
+  /* gradient background effect: soft blue/teal blooms over an off-white wash */
+  --app-gradient:radial-gradient(1100px 760px at 12% -10%,rgba(0,88,190,.12),transparent 60%),radial-gradient(900px 700px at 105% 105%,rgba(0,112,122,.12),transparent 55%),linear-gradient(180deg,#fafbfd,#eef1f6); /* @kind color */
+  --scrim-bg:rgba(20,26,38,.32);
+  --scrim-blur:blur(3px); /* @kind other */
+  --scrollbar-thumb:rgba(15,23,42,.14);
+  --scrollbar-thumb-hover:rgba(15,23,42,.22);
+  --selection-bg:rgba(0,88,190,.18);
+  --selection-ink:#0058be;
+}

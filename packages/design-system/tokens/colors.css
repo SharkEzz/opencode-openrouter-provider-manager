@@ -56,4 +56,13 @@
   --syntax-number:var(--obs-amber);
   --syntax-type:var(--obs-secondary-fixed);
   --syntax-gutter:var(--obs-slate-500);
+
+  /* theme-switch surface: identical to --surface-app in dark, replaced with a gradient in light */
+  --app-gradient:var(--surface-app); /* @kind color */
+  --scrim-bg:rgba(0,0,0,.5);
+  --scrim-blur:none; /* @kind other */
+  --scrollbar-thumb:var(--obs-white-08);
+  --scrollbar-thumb-hover:var(--obs-white-12);
+  --selection-bg:var(--obs-blue-20);
+  --selection-ink:var(--obs-primary-fixed);
 }

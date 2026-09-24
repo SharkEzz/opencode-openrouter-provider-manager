@@ -160,6 +160,27 @@ no parallax. At most one `ping` indicator visible at a time.
   blue at 28px for chrome. See `guidelines/brand-wordmark.html`. **No mark was drawn or
   approximated** — supply the real files and replace both.
 
+## Light theme
+
+An alternate light mode, opt in via `[data-theme="light"]` on any ancestor element — every
+component re-themes automatically since it only ever reads the semantic aliases in
+`tokens/colors.css`, and those are what `tokens/theme-light.css` overrides. No raw `--obs-*`
+value or component file changes between themes.
+
+- **Surfaces:** white canvas/panes, `#f3f5f8` app chrome — same four-strata structure as dark,
+  just inverted in value.
+- **Ink and accent text** move to darker pairs (`#0058be` route, `#00707a` telemetry,
+  `#8a0099` meta) so they clear 4.5:1 on white; badge/status fills reuse the same alpha tints,
+  since those composite correctly over any base.
+- **Glass is more transparent and more blurred than dark** — 66% white fill and a 28px blur
+  (dark uses 95% fill and 16px) — so palettes, toasts and the route-picker scrim genuinely show
+  what's behind them.
+- **Gradient background:** the app shell (`--app-gradient`) carries a soft radial bloom of blue
+  and teal over an off-white wash instead of a flat fill — the one gradient in the system, used
+  only at the outer app-background level, never inside cards or buttons.
+- Toggle it live in `ui_kits/obsidian-ide/index.html` via the sun/moon icon in the title bar;
+  specimens are under the "Light Theme" card group (`guidelines/light-*.html`).
+
 ## Known conflicts in the brief
 
 1. **Canvas colour.** The token block sets `surface: #131313`; the prose calls for `#000000`

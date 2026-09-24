@@ -45,7 +45,7 @@ function ActivityRail({ view, onView }) {
   );
 }
 
-function TitleBar({ tabs, activeTab, onTab, onPalette }) {
+function TitleBar({ tabs, activeTab, onTab, onPalette, theme, onToggleTheme }) {
   return (
     <header style={{ display: 'flex', alignItems: 'stretch', height: 'var(--bar-toolbar)', flex: '0 0 auto', background: 'var(--surface-app)', borderBottom: '1px solid var(--hairline)' }}>
       <div style={{ display: 'flex', alignItems: 'stretch', minWidth: 0, overflow: 'hidden' }}>
@@ -93,6 +93,7 @@ function TitleBar({ tabs, activeTab, onTab, onPalette }) {
       </div>
       <div style={{ display: 'flex', alignItems: 'center', gap: 'var(--space-sm)', padding: '0 var(--gutter)', flex: '0 0 auto' }}>
         <Badge tone="route">@fast</Badge>
+        <IconButton label={theme === 'light' ? 'Switch to dark' : 'Switch to light'} onClick={onToggleTheme}><Icon name={theme === 'light' ? 'moon' : 'sun'} size={14} /></IconButton>
         <IconButton label="Split editor"><Icon name="columns-2" size={14} /></IconButton>
         <IconButton label="Terminal" active><Icon name="terminal" size={14} /></IconButton>
       </div>

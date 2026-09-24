@@ -1,13 +1,13 @@
 *,*::before,*::after{box-sizing:border-box}
 html{color-scheme:dark}
-body{margin:0;background:var(--surface-app);color:var(--text-primary);font-family:var(--font-mono);font-size:var(--body-md-size);line-height:var(--body-md-lh);font-feature-settings:var(--mono-features);-webkit-font-smoothing:antialiased}
+body{margin:0;background:var(--app-gradient);color:var(--text-primary);font-family:var(--font-mono);font-size:var(--body-md-size);line-height:var(--body-md-lh);font-feature-settings:var(--mono-features);-webkit-font-smoothing:antialiased}
 h1,h2,h3,h4{font-family:var(--font-sans);font-weight:600;margin:0;letter-spacing:-0.015em}
 code,pre,kbd{font-family:var(--font-mono);font-feature-settings:var(--mono-features)}
 a{color:var(--text-link);text-decoration:none;border-bottom:1px solid var(--obs-blue-30);transition:color var(--dur) var(--ease-out),border-color var(--dur) var(--ease-out)}
 a:hover{color:var(--text-link-hover);border-bottom-color:var(--obs-primary)}
-::selection{background:var(--obs-blue-20);color:var(--obs-primary-fixed)}
+::selection{background:var(--selection-bg);color:var(--selection-ink)}
 :focus-visible{outline:none;box-shadow:var(--focus-ring)}
 ::-webkit-scrollbar{width:10px;height:10px}
 ::-webkit-scrollbar-track{background:transparent}
-::-webkit-scrollbar-thumb{background:var(--obs-white-08);border-radius:var(--radius-full);border:3px solid transparent;background-clip:content-box}
-::-webkit-scrollbar-thumb:hover{background:var(--obs-white-12);background-clip:content-box}
+::-webkit-scrollbar-thumb{background:var(--scrollbar-thumb);border-radius:var(--radius-full);border:3px solid transparent;background-clip:content-box}
+::-webkit-scrollbar-thumb:hover{background:var(--scrollbar-thumb-hover);background-clip:content-box}
