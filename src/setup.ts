@@ -4,6 +4,7 @@ import { Choice, OpenRouterProviders } from '../rpc.ts';
 import { DEBUG_LOG, logRequest } from './debug.ts';
 import { fetchEndpoints } from './openrouter.ts';
 import { pinProvider } from './pin.ts';
+import { isRecord } from './utils.ts';
 
 const PROVIDER = 'openrouter';
 
@@ -21,10 +22,6 @@ type RuntimeContext = {
     connection: Pick<Plugin.Context['integration']['connection'], 'active' | 'resolve'>;
   };
 };
-
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
-}
 
 export async function setupPlugin(ctx: RuntimeContext) {
   const storageKey = (model: string) => `choice/${encodeURIComponent(model)}`;

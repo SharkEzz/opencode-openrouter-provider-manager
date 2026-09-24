@@ -9,7 +9,7 @@
     "reportUnusedDisableDirectives": "warn",
     "typeAware": true
   },
-  "plugins": ["oxc", "typescript", "node"],
+  "plugins": ["oxc", "typescript", "node", "promise"],
   "categories": {
     "correctness": "error",
     "perf": "warn",

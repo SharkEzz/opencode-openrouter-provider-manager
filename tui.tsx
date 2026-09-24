@@ -213,8 +213,9 @@ export default Plugin.define({
             message: `Request log enabled: ${log}`,
             variant: 'info',
           });
+        return undefined;
       })
-      .catch(() => {});
+      .catch(() => undefined);
 
     // keymap.layer needs the host's Keymap provider, which only exists inside the rendered
     // tree: register it from an invisible component mounted in the `app` slot.
@@ -254,8 +255,10 @@ export default Plugin.define({
       ),
     });
 
-    const stopModelSelected = ctx.data.on('session.model.selected', (event) => {
-      updatePicks((draft) => void delete draft[event.data.sessionID]);
+    const stopModelSelected = ctx.data.on('session.model.selected', (event): void => {
+      updatePicks((draft): void => {
+        Reflect.deleteProperty(draft, event.data.sessionID);
+      });
     });
 
     // A strict pin fails loudly when its endpoint is down; point the user at the fix.

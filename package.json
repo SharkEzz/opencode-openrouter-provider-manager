@@ -22,7 +22,7 @@
     "test:coverage": "vitest run --coverage",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
-    "lint": "oxlint --write",
+    "lint": "oxlint --fix",
     "lint:check": "oxlint"
   },
   "devDependencies": {
@@ -34,12 +34,17 @@
     "@vitest/coverage-v8": "^5.0.1",
     "oxfmt": "^0.70.0",
     "oxlint": "^1.85.0",
-    "oxlint-tsgolint": "^7.0.2002",
+    "oxlint-tsgolint": "^7.0.2003",
     "typescript": "^7.0.2",
     "vitest": "^5.0.1"
   },
   "peerDependencies": {
     "solid-js": "1.9.12"
+  },
+  "peerDependenciesMeta": {
+    "solid-js": {
+      "optional": true
+    }
   },
   "allowScripts": {
     "msgpackr-extract@3.0.4": true,
