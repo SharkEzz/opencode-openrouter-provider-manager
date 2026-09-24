@@ -14,7 +14,7 @@ const AUTO = '__auto__';
 
 type Theme = Plugin.Context['theme'];
 type Color = Theme['text']['base'];
-type ColoredOption = DialogSelectOption<string> & { footerColor?: Color };
+type ColoredOption = DialogSelectOption<string> & { footerColor?: Color; searchText: string };
 
 /** Flex and priority endpoints stand out; default ones use the surrounding color. */
 function tierColor(theme: Theme, tier: Endpoint['tier']): Color | undefined {
@@ -109,8 +109,9 @@ export default Plugin.define({
           .filter(Boolean)
           .join(' · '),
         footer: endpoint.tag,
-        // Undocumented: OpenCode's list reads `footerColor` (not in DialogSelectOption). If a
-        // future version drops it, the tag simply renders uncolored.
+        // OpenCode searches title/category/searchText, not footer. Both extra fields are
+        // undocumented; if support disappears, the tag still renders as plain text.
+        searchText: endpoint.tag,
         ...(footerColor ? { footerColor } : undefined),
       };
     }

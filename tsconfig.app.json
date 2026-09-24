@@ -3,5 +3,5 @@
   "compilerOptions": {
     "tsBuildInfoFile": "./node_modules/app.tsbuildInfo"
   },
-  "include": ["index.ts", "rpc.ts", "src/**/*.ts", "tui.tsx"]
+  "include": ["index.ts", "rpc.ts", "src", "tui.tsx"]
 }
