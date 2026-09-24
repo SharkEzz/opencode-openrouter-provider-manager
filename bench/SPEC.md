@@ -29,34 +29,37 @@ Hors périmètre : l'implémentation du site (seuls son contrat de données et s
 
 ## 3. Modèles
 
-Déclarés dans `bench/config.ts` :
+Déclarés dans `bench/config.ts`. Le choix s'appuie sur l'usage OpenCode réel observé (§11.9) : l'essentiel du trafic va vers des modèles open-weight servis par de nombreux hébergeurs, où l'écart entre hébergeurs est le plus fort.
 
-| Modèle      | Rôle                                   |
-| ----------- | -------------------------------------- |
-| GPT 6 Terra | cœur de la suite, plus de répétitions  |
-| GPT 6 Sol   | modèle plus cher, moins de répétitions |
-| _à définir_ | modèle open-weight multi-hébergeurs    |
+| Modèle                         | Rôle                                                                                                           |
+| ------------------------------ | -------------------------------------------------------------------------------------------------------------- |
+| `z-ai/glm-5.3-flash`           | cœur de la suite, modèle affiché par défaut sur le site (12 hébergeurs observés, TTFT p50 de 985ms à 15,769ms) |
+| `deepseek/deepseek-v4.1-flash` | cœur de la suite (7 hébergeurs observés)                                                                       |
+| `openai/gpt-6-sol`             | illustre les tiers OpenAI (`openai/flex`, `openai/fast`) ; plus cher, donc moins de répétitions                |
 
-Les slugs OpenRouter exacts sont renseignés dans la config. Les endpoints OpenAI exposent les tiers `openai`, `openai/flex` et `openai/fast` ou `openai/priority`, ainsi qu'Azure. Ce sont eux qui rendent le plugin intéressant sur ces modèles.
-
-Le 3ᵉ slot accueille un modèle open-weight servi par beaucoup d'hébergeurs (du type DeepSeek, voir `tests/fixtures/deepseek.endpoints.json`), pour montrer la dispersion d'Auto. Son slug est choisi au dry-run.
+Les slugs sont vérifiés au dry-run (§13). Les deux modèles open-weight coûtent très peu, ce qui permet de concentrer les répétitions sur eux dans le budget de 5 $.
 
 ## 4. Configurations comparées
 
-Pour chaque modèle, les configurations sont résolues au lancement à partir de `/models/{id}/endpoints` :
+Pour chaque modèle, les configurations sont résolues au lancement à partir de `/models/{id}/endpoints` et du dernier export observé (`bench/observed/<date>.json`, §12) :
 
-| id         | Requête envoyée                                                        |
-| ---------- | ---------------------------------------------------------------------- |
-| `auto`     | corps inchangé : c'est la référence                                    |
-| `cheapest` | pin sur le tag au plus petit prix d'entrée (en pratique `openai/flex`) |
-| `fastest`  | pin sur le tier `priority` (`openai/fast` ou `openai/priority`)        |
-| `default`  | pin sur le tag du provider d'origine sans suffixe (`openai`)           |
-| `alt-host` | pin sur l'hébergeur alternatif le moins cher (`azure`)                 |
+| id           | Requête envoyée                                                                                                                      |
+| ------------ | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `auto`       | corps inchangé : c'est la référence                                                                                                  |
+| `cheapest`   | pin sur le tag au plus petit prix d'entrée (sur `gpt-6-sol`, en pratique `openai/flex`)                                              |
+| `fastest`    | pin sur le tier `priority` s'il existe (`openai/fast`, `openai/priority`) ; sinon sur l'hébergeur au plus petit TTFT p50 **observé** |
+| `best-cache` | pin sur l'hébergeur au meilleur `cacheHitRate` **observé**                                                                           |
+| `default`    | pin sur le tag du provider d'origine sans suffixe (`openai`, `deepseek`, `z-ai`)                                                     |
+| `alt-host`   | pin sur l'hébergeur alternatif le moins cher (`azure` sur `gpt-6-sol`)                                                               |
 
-- Le **provider d'origine** est l'hébergeur dont le tag, sans suffixe, correspond à l'auteur du slug : `openai/…` → `openai`, `deepseek/…` → `deepseek`. S'il n'existe pas, `default` est omise et `alt-host` considère tous les hébergeurs.
+- Le **provider d'origine** est l'hébergeur dont le tag, sans suffixe, correspond à l'auteur du slug : `openai/…` → `openai`, `deepseek/…` → `deepseek`, `z-ai/…` → `z-ai`. S'il n'existe pas, `default` est omise et `alt-host` considère tous les hébergeurs.
 - `alt-host` retient **un seul** tag : le moins cher en entrée parmi ceux dont l'hébergeur n'est pas le provider d'origine (sur la fixture Sol : `azure`, pas `azure/us`). `fetchEndpoints()` dédoublonne déjà les tags listés deux fois.
-- Deux stratégies qui résolvent vers le même tag sont fusionnées.
-- Une stratégie sans candidat (par exemple pas de tier `priority`) est omise et signalée dans le rapport.
+- **Stratégies issues de l'observé** (`fastest` sans tier priority, `best-cache`) :
+  - seuls comptent les hébergeurs avec au moins **50 requêtes** dans l'export, pour ne pas choisir sur un échantillon minuscule ;
+  - l'hébergeur observé (`provider`, nom affiché) est rapproché d'un tag de `/endpoints` via `provider_name` ; sans correspondance, la stratégie est omise ;
+  - le rapport et le site indiquent que le choix vient de l'usage observé ; le bench le vérifie ensuite en conditions contrôlées. Le résultat peut contredire l'observé, et c'est affiché tel quel.
+- Deux stratégies qui résolvent vers le même tag sont fusionnées (le rapport liste les deux noms).
+- Une stratégie sans candidat est omise et signalée dans le rapport.
 - Les tags `router` et les endpoints sans tag sont ignorés, comme dans le plugin.
 
 ## 5. Workloads
@@ -127,10 +130,10 @@ Pour `agentic`, les métriques sont aussi agrégées par tâche : somme des coû
 - **Budget inférieur à 5 $** :
   - `--dry-run` estime le coût de chaque cellule à partir des prix de `/endpoints` et des tokens attendus par workload, sans faire d'appel payant ;
   - pendant le run, `--max-usd` (5 par défaut) est un plafond strict grâce à une **réservation avant envoi**. Avant chaque requête, le runner réserve son coût maximal : tokens d'entrée × prix d'entrée, plus le plafond `max_tokens` du workload × effort (§5) × prix de sortie, au tarif le plus cher de la config (pour `auto`, l'endpoint le plus cher du modèle). Il n'envoie la requête que si le coût dépensé, plus les réservations des requêtes en cours, plus cette nouvelle réservation reste sous le plafond. À la fin de la requête, la réservation est remplacée par le `costUsd` réel. Pour `agentic`, la réservation couvre la tâche entière (8 tours × pire cas par tour).
-- **Matrice réduite** : la matrice complète (2 modèles × 5 configs × 3 efforts × 4 workloads × n=20) dépasse largement le budget. On retient donc :
-  - les 3 niveaux de reasoning seulement pour `short` et `long` ;
-  - `agentic` et `big-context` en `medium` seulement ;
-  - n=15 pour Terra et n=8 pour Sol, ajustables en CLI.
+- **Matrice réduite** : la matrice complète (3 modèles × 6 configs × 3 efforts × 4 workloads × n=20) dépasse largement le budget. L'usage observé montre que 94.4 % des tokens d'entrée d'un agent de code sont lus en cache et que la sortie ne pèse que 0.43 % des tokens : **`agentic` et `big-context` sont le cœur de la suite**. On retient donc :
+  - `agentic` et `big-context` en `medium`, avec le plus de répétitions (valeurs de départ : n=15 sur les modèles open-weight, n=6 sur `gpt-6-sol`) ;
+  - `short` et `long` pour le TTFT et le débit, avec les 3 niveaux de reasoning mais un n réduit (n=8 sur les modèles open-weight, n=4 sur `gpt-6-sol`) ;
+  - toutes ces valeurs sont ajustables en CLI.
 
   La matrice finale est arbitrée à partir du dry-run.
 
@@ -148,7 +151,7 @@ Une cellule correspond à un couple modèle × workload × effort × config. Pou
   - `stability` : ratio des p95/p50 de `ttftMs` ;
   - `cacheHit` : ratio des `cacheRatio` (`big-context` uniquement).
 
-  Un chiffre n'est mis en avant (`headlines`) que si son IC exclut 1. Avec n=8 (Sol), les IC seront larges et les headlines rares : c'est assumé ;
+  Un chiffre n'est mis en avant (`headlines`) que si son IC exclut 1. Avec un n réduit (`gpt-6-sol`, `short`, `long`), les IC seront larges et les headlines rares : c'est assumé ;
 
 - la **prévisibilité** : coefficient de variation, IQR, ratio p95/p50, taux de succès ;
 - pour `auto` : la répartition des `providerUsed` et le nombre d'hébergeurs distincts ; pour `agentic`, la part des tâches où Auto a changé d'hébergeur (`providerSwitchRate`) ;
@@ -312,10 +315,10 @@ Données : `run`, `cells[]`.
 
 ### 11.2 Contrôles
 
-- **Onglets de stratégie** : **Cost** (`cheapest`, sélectionné par défaut), **Speed** (`fastest`), **Default** (`default`), **Alt host** (`alt-host`, libellé = hébergeur réel, ex. « Azure »). Une stratégie absente pour le modèle choisi est grisée, avec une infobulle qui explique pourquoi.
-- **Sélecteur de modèle** et **sélecteur d'effort** (`low` / `medium` / `high`, limité aux efforts mesurés pour le workload affiché).
+- **Onglets de stratégie** : **Cost** (`cheapest`, sélectionné par défaut), **Speed** (`fastest`), **Cache** (`best-cache`), **Default** (`default`), **Alt host** (`alt-host`, libellé = hébergeur réel, ex. « Azure »). Chaque onglet affiche en muted le tag résolu. Une stratégie absente pour le modèle choisi est grisée, avec une infobulle qui explique pourquoi ; une stratégie choisie sur l'usage observé porte la mention `picked from observed usage`.
+- **Sélecteur de modèle** (`glm-5.3-flash` par défaut ; `gpt-6-sol` est le modèle qui illustre les tiers `flex` et `fast`) et **sélecteur d'effort** (`low` / `medium` / `high`, limité aux efforts mesurés pour le workload affiché).
 - **Slider de volume** en **tokens par jour**, échelle logarithmique de **100k à 100M**. Il n'y a pas de presets de volume.
-- **Sélecteur de profil** d'usage (répartition des tokens) : `Coding agent`, `Chat`, `Long generation`. Voir §11.3.
+- **Sélecteur de profil** d'usage (répartition des tokens) : `Coding agent` (par défaut), `Chat`, `Long generation`. Voir §11.3.
 
 Tous les blocs suivants réagissent à ces contrôles.
 
@@ -366,7 +369,7 @@ Données : `endpoints[]` jointes à `cells[]`.
 
 - Strip ou box plots de `ttftMs` et `outputTps` : chaque point est une requête, Auto en gris et les pins en couleur.
 - Tableau complet p50/p90/p95 avec les erreurs, toutes cellules confondues.
-- Méthodologie : protocole (§8), statistiques (§9), limites connues (runs locaux, n faible sur Sol, TTFT dépendant de la connexion du poste), date du snapshot des prix et commit du run.
+- Méthodologie : protocole (§8), statistiques (§9), limites connues (runs locaux, n faible sur `gpt-6-sol`, stratégies choisies sur l'usage observé, TTFT dépendant de la connexion du poste), date du snapshot des prix et commit du run.
 
 Données : `samples[]`, `cells[]`, `run`.
 
@@ -408,7 +411,7 @@ Exécution : les runs sont **locaux et ponctuels**, lancés manuellement (pas de
 Fichiers prévus :
 
 - `bench/config.ts` : modèles, efforts, matrice, n, budget.
-- `bench/strategies.ts` : liste d'endpoints → configurations (réutilise `fetchEndpoints`, `tierOf` et `pinProvider`).
+- `bench/strategies.ts` : liste d'endpoints + dernier export observé → configurations (réutilise `fetchEndpoints`, `tierOf` et `pinProvider`). Sans export observé, `fastest` (hors tier priority) et `best-cache` sont omises.
 - `bench/client.ts` : parsing SSE, chronométrage, `usage`, appel `/generation`, classification des erreurs.
 - `bench/workloads/{short,long,agentic,big-context}.ts` et `bench/fixtures/` (corpus figé, mocks d'outils).
 - `bench/run.ts` : CLI avec `--dry-run`, `--max-usd`, `--models`, `--workloads`, `--n`, `--seed` et `--resume`.
@@ -423,7 +426,7 @@ Fichiers prévus :
 
 - `package.json` : scripts `bench`, `bench:profile`, `bench:observe`, `bench:summarize` et `bench:report`. `bench/` est inclus dans le typecheck, oxlint et oxfmt.
 - Tests Vitest sur des fixtures, sans appel réel :
-  - `tests/bench-strategies.test.ts` (à partir de `tests/fixtures/gpt-6-sol.endpoints.json`, où `alt-host` doit donner `azure`, et de `tests/fixtures/deepseek.endpoints.json`) ;
+  - `tests/bench-strategies.test.ts` (à partir de `tests/fixtures/gpt-6-sol.endpoints.json`, où `alt-host` doit donner `azure`, de `tests/fixtures/deepseek.endpoints.json`, et d'une fixture observée `tests/fixtures/observed.json` : seuil de 50 requêtes, rapprochement `provider` → tag, stratégie omise sans correspondance, fusion des stratégies qui résolvent vers le même tag) ;
   - `tests/bench-client.test.ts` (flux SSE fixture, `finish_reason: length`, erreurs 429 et timeout, retry de `/generation`) ;
   - `tests/bench-stats.test.ts` (quantiles, bootstrap seedé, ratios) ;
   - `tests/bench-profile.test.ts` (base SQLite fixture en mémoire : parts correctes, aucun champ hors liste blanche dans la sortie).
@@ -443,8 +446,7 @@ Vérification :
 
 ## 13. Points ouverts
 
-- Les slugs OpenRouter exacts de GPT 6 Terra et Sol, et celui du modèle multi-hébergeurs.
+- Les slugs OpenRouter exacts de `glm-5.3-flash`, `deepseek-v4.1-flash` et `gpt-6-sol`, à vérifier au dry-run.
 - La matrice finale et les plafonds `max_tokens`, à arbitrer après le premier dry-run.
 - La période d'historique OpenCode retenue pour le profil `coding-agent`.
 - La bibliothèque de graphiques du site.
-- Le choix des modèles au vu de l'usage observé (§11.9) : les écarts entre hébergeurs sont bien plus forts sur les modèles open-weight que sur les modèles OpenAI.
