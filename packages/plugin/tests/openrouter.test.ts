@@ -64,12 +64,16 @@ describe('normalize', () => {
       tier: 'priority',
       input: 4,
       output: 20,
+      cached: 0.4,
       context: 1_100_000,
       quantization: null,
       status: 0,
       uptime: 100,
       reasoning: true,
     });
+  });
+  it('leaves the cached price unknown when the endpoint does not publish it', () => {
+    expect(normalize(sol.data.endpoints[2]!)?.cached).toBeNull();
   });
   it('detects endpoints without reasoning support', () => {
     expect(normalize(sol.data.endpoints[2]!)?.reasoning).toBe(false);

@@ -10,7 +10,7 @@
         "status": 0,
         "uptime_last_30m": 100,
         "supported_parameters": ["reasoning", "tools"],
-        "pricing": { "prompt": "0.000004", "completion": "0.00002" }
+        "pricing": { "prompt": "0.000004", "completion": "0.00002", "input_cache_read": "0.0000004" }
       },
       {
         "provider_name": "OpenAI",
@@ -47,7 +47,7 @@
         "status": 0,
         "uptime_last_30m": null,
         "supported_parameters": ["reasoning"],
-        "pricing": { "prompt": "0.000001", "completion": "0.000005" }
+        "pricing": { "prompt": "0.000001", "completion": "0.000005", "input_cache_read": "0.0000001" }
       },
       {
         "provider_name": "Azure",

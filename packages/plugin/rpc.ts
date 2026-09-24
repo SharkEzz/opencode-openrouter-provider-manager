@@ -12,6 +12,8 @@ export const Endpoint = z.object({
   /** USD per million tokens; null when OpenRouter does not publish the price. */
   input: z.number().nullable(),
   output: z.number().nullable(),
+  /** USD per million prompt-cache read tokens; null when the endpoint does not publish it. */
+  cached: z.number().nullable(),
   context: z.number().nullable(),
   quantization: z.string().nullable(),
   /** 0 is healthy; any other value is a degraded endpoint. */

@@ -14,7 +14,11 @@ const RawEndpoint = z
     uptime_last_30m: z.number().nullable().optional(),
     supported_parameters: z.array(z.string()).optional(),
     pricing: z
-      .object({ prompt: z.string().optional(), completion: z.string().optional() })
+      .object({
+        prompt: z.string().optional(),
+        completion: z.string().optional(),
+        input_cache_read: z.string().optional(),
+      })
       .passthrough()
       .optional(),
   })
@@ -76,6 +80,7 @@ export function normalize(raw: RawEndpoint): Endpoint | undefined {
     tier: tierOf(raw.tag),
     input: perMillion(raw.pricing?.prompt),
     output: perMillion(raw.pricing?.completion),
+    cached: perMillion(raw.pricing?.input_cache_read),
     context: raw.context_length ?? null,
     quantization: raw.quantization && raw.quantization !== 'unknown' ? raw.quantization : null,
     status: raw.status ?? 0,

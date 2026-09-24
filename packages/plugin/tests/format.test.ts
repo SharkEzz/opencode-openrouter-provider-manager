@@ -8,6 +8,7 @@ const endpoint = (overrides: Partial<Endpoint> = {}): Endpoint => ({
   tier: 'default',
   input: 2,
   output: 10,
+  cached: null,
   context: 1_100_000,
   quantization: null,
   status: 0,
