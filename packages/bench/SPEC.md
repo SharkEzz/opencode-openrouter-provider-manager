@@ -169,7 +169,15 @@ C'est le contrat avec le site (`apps/site/`). Il est validé par un schéma zod 
 ```ts
 type Summary = {
   version: 1;
-  run: { id: string; date: string; commit: string; seed: number; maxUsd: number; spentUsd: number };
+  run: {
+    id: string;
+    date: string;
+    commit: string;
+    seed: number;
+    maxUsd: number;
+    spentUsd: number;
+    synthetic: boolean; // données générées (fake-summary.ts) : bandeau sur le site, build de production refusé
+  };
   headlines: Headline[]; // chiffres mis en avant (IC excluant 1)
   cells: Cell[]; // agrégats par modèle × workload × effort × config
   endpoints: EndpointSnapshot[]; // prix, contexte, quantization au moment du run
@@ -227,6 +235,21 @@ type Cell = {
   providers?: Record<string, number>; // auto uniquement : part par hébergeur
   providerSwitchRate?: number; // auto × agentic : part des tâches ayant changé d'hébergeur
   errors: Record<string, number>; // inclut truncated
+};
+
+type EndpointSnapshot = {
+  // l'Endpoint du plugin au moment du run, plus le modèle concerné
+  model: string;
+  tag: string;
+  provider: string;
+  tier: 'flex' | 'default' | 'priority';
+  input: number | null; // $/M
+  output: number | null;
+  cached: number | null;
+  context: number | null;
+  quantization: string | null;
+  status: number;
+  uptime: number | null;
 };
 
 type CostModel = {
@@ -420,7 +443,9 @@ Fichiers prévus :
 - `client.ts` : parsing SSE, chronométrage, `usage`, appel `/generation`, classification des erreurs.
 - `workloads/{short,long,agentic,big-context}.ts` et `fixtures/` (corpus figé, mocks d'outils).
 - `run.ts` : CLI avec `--dry-run`, `--max-usd`, `--models`, `--workloads`, `--n`, `--seed` et `--resume`.
-- `stats.ts` (quantiles, bootstrap, CV), `summarize.ts`, `report.ts`, `schema.ts`.
+- `stats.ts` (quantiles, bootstrap, CV), `summarize.ts`, `report.ts`, `schema.ts`. Le schéma zod `Summary` vérifie aussi les invariants : stats `null` si `ok = 0`, `successRate = ok / n`, `tag` nul seulement pour `auto`, parts d'un profil de somme 1.
+- `profiles.ts` : `profileFromObserved()` calcule le profil `coding-agent` (source `openrouter-observed`) depuis un export observé. Chez OpenRouter, les tokens en cache sont inclus dans les tokens d'entrée et le raisonnement dans la sortie ; ils sont séparés pour que les quatre parts soient disjointes.
+- `fake-summary.ts` (`bench:fake`) : écrit `results/summary.fake.json`, un summary **synthétique** (`run.synthetic: true`, graine fixe) pour construire le site avant le premier run. Seuls `observed` et le profil `coding-agent` y sont réels. Les dossiers `results/` et `observed/` sont exclus d'oxfmt : ce sont des données générées, validées par le schéma.
 - `profile.ts` : lit l'historique OpenCode **en lecture seule** (`~/.local/share/opencode/opencode.db`, table `message`, messages `assistant` dont `providerID` vaut `openrouter`). Il agrège `tokens.input`, `tokens.cache.read`, `tokens.output` et `tokens.reasoning` sur une période (`--since`), puis écrit `profiles/coding-agent.json` : les parts, n et la période, **rien d'autre** (ni contenu, ni id de session ou de projet, ni chemin). Ce fichier est commité. `tokens.input` exclut déjà les lectures de cache. `bench:summarize` fusionne ce profil avec les profils dérivés des workloads dans `profiles[]`.
 - `observe.ts` : exporte l'usage réel via `POST /api/v1/analytics/query` avec `OPENROUTER_MANAGEMENT_KEY` (clé de management ; la clé d'inférence renvoie 403). Contraintes constatées :
   - le filtre `app` exige l'**id numérique** (le nom renvoie 500) ; on le retrouve via `/generation?id=` sur une génération de l'app (`app_id`) ;
