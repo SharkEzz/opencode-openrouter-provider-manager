@@ -8,6 +8,14 @@ allowBuilds:
   msgpackr-extract@3.0.4: true
   fsevents@2.3.3: true
 
+# Supply-chain guard: never resolve a version published less than 24 h ago. Declaring it
+# explicitly turns on strict mode, so a too-recent version fails the install instead of being
+# silently added to the exclusions below (pnpm's non-strict default).
+minimumReleaseAge: 1440
+
+# Deliberate exceptions only. @opencode/* 2.0.16 is the OpenCode host version the plugin is
+# tested against; oxlint-tsgolint 7.0.2003 is the linter in use. Both were under 24 h old when
+# added (2026-09-24) and can be removed once mature.
 minimumReleaseAgeExclude:
   - '@opencode/ai@2.0.16'
   - '@opencode/client@2.0.16'
