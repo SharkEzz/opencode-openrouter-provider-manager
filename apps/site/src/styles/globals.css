@@ -1,0 +1,108 @@
+@import 'tailwindcss';
+
+/* Design system tokens, minus its CDN fonts.css: fonts are self-hosted below. */
+@import '@orpm/design-system/tokens/palette.css';
+@import '@orpm/design-system/tokens/colors.css';
+/* Classes and element styles go in Tailwind layers, so utilities can override them. */
+@import '@orpm/design-system/tokens/typography.css' layer(components);
+@import '@orpm/design-system/tokens/spacing.css';
+@import '@orpm/design-system/tokens/elevation.css';
+@import '@orpm/design-system/tokens/base.css' layer(base);
+@import '@orpm/design-system/tokens/theme-light.css';
+@import '@fontsource-variable/inter';
+@import '@fontsource-variable/jetbrains-mono';
+
+:root {
+  --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+}
+
+/* The design system's base.css pins `color-scheme: dark`; the light theme must reset it so
+   native scrollbars and form controls follow. To be fixed upstream in the design system. */
+[data-theme='light'] {
+  color-scheme: light;
+}
+
+/* base.css sets the mono feature settings on body, so Inter headlines inherit `tnum`, which
+   widens their hyphens ("trade - off"). Headlines keep Inter's defaults. To be fixed upstream. */
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  .headline-lg,
+  .headline-md,
+  .headline-sm {
+    font-feature-settings: normal;
+  }
+}
+
+/* Tailwind theme mapped onto the design system's semantic aliases only (never --obs-* or hex),
+   so every utility follows the light theme. `inline` keeps the var() references live. */
+@theme inline {
+  --font-sans: var(--font-sans);
+  --font-mono: var(--font-mono);
+
+  --color-surface-app: var(--surface-app);
+  --color-surface-docked: var(--surface-docked);
+  --color-surface-pane: var(--surface-pane);
+  --color-surface-raised: var(--surface-raised);
+  --color-surface-input: var(--surface-input);
+  --color-surface-hover: var(--surface-hover);
+  --color-surface-selected: var(--surface-selected);
+  --color-text-primary: var(--text-primary);
+  --color-text-secondary: var(--text-secondary);
+  --color-text-muted: var(--text-muted);
+  --color-text-faint: var(--text-faint);
+  --color-text-on-accent: var(--text-on-accent);
+  --color-hairline: var(--hairline);
+  --color-border-strong: var(--border-strong);
+  --color-route: var(--accent-route);
+  --color-route-ink: var(--accent-route-ink);
+  --color-telemetry: var(--accent-telemetry);
+  --color-telemetry-ink: var(--accent-telemetry-ink);
+  --color-meta: var(--accent-meta);
+  --color-meta-ink: var(--accent-meta-ink);
+  --color-ok: var(--status-ok);
+  --color-ok-bg: var(--status-ok-bg);
+  --color-warn: var(--status-warn);
+  --color-warn-bg: var(--status-warn-bg);
+  --color-fault: var(--status-fault);
+  --color-fault-bg: var(--status-fault-bg);
+
+  /* shadcn's variables, pointed at the same aliases. */
+  --color-background: var(--surface-app);
+  --color-foreground: var(--text-primary);
+  --color-card: var(--surface-docked);
+  --color-card-foreground: var(--text-primary);
+  --color-popover: var(--surface-raised);
+  --color-popover-foreground: var(--text-primary);
+  --color-primary: var(--accent-route);
+  --color-primary-foreground: var(--text-on-accent);
+  --color-secondary: var(--surface-raised);
+  --color-secondary-foreground: var(--text-primary);
+  --color-muted: var(--surface-pane);
+  --color-muted-foreground: var(--text-muted);
+  --color-accent: var(--surface-hover);
+  --color-accent-foreground: var(--text-primary);
+  --color-destructive: var(--status-fault);
+  --color-border: var(--hairline);
+  --color-input: var(--border-input);
+  --color-ring: var(--border-focus);
+
+  /* The design system's chiselled radii. */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
+
+  --ease-out: cubic-bezier(0.2, 0.8, 0.3, 1);
+}
+
+/* shadcn's Base UI components style `data-horizontal:`/`data-vertical:`, but Base UI sets
+   `data-orientation`. */
+@custom-variant data-horizontal (&[data-orientation='horizontal']);
+@custom-variant data-vertical (&[data-orientation='vertical']);
+
+/* shadcn's `dark:` utilities must follow the site toggle, not the OS preference. */
+@custom-variant dark (&:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *));
