@@ -1,20 +1,20 @@
-import { appendFile, mkdir } from "node:fs/promises"
-import { homedir } from "node:os"
-import path from "node:path"
+import { appendFile, mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
 
 export const DEBUG_LOG = path.join(
-  process.env.XDG_DATA_HOME ?? path.join(homedir(), ".local", "share"),
-  "opencode",
-  "log",
-  "openrouter-provider-manager.log",
-)
+  process.env.XDG_DATA_HOME ?? path.join(homedir(), '.local', 'share'),
+  'opencode',
+  'log',
+  'openrouter-provider-manager.log',
+);
 
 /** One line per outgoing OpenRouter request: the fields that decide effort and routing. */
 export async function logRequest(entry: {
-  kind: string
-  model: string
-  sessionID: string
-  body: Record<string, unknown>
+  kind: string;
+  model: string;
+  sessionID: string;
+  body: Record<string, unknown>;
 }) {
   const fields = Object.entries({
     model: entry.model,
@@ -27,7 +27,7 @@ export async function logRequest(entry: {
     provider: entry.body.provider,
   })
     .filter(([, value]) => value !== undefined)
-    .map(([key, value]) => `${key}=${typeof value === "string" ? value : JSON.stringify(value)}`)
-  await mkdir(path.dirname(DEBUG_LOG), { recursive: true })
-  await appendFile(DEBUG_LOG, `${new Date().toISOString()} ${fields.join("  ")}\n`)
+    .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`);
+  await mkdir(path.dirname(DEBUG_LOG), { recursive: true });
+  await appendFile(DEBUG_LOG, `${new Date().toISOString()} ${fields.join('  ')}\n`);
 }

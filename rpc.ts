@@ -1,8 +1,8 @@
-import { Rpc } from "@opencode/plugin"
-import { z } from "zod"
+import { Rpc } from '@opencode/plugin';
+import { z } from 'zod';
 
-export const Tier = z.enum(["flex", "default", "priority"])
-export type Tier = z.infer<typeof Tier>
+export const Tier = z.enum(['flex', 'default', 'priority']);
+export type Tier = z.infer<typeof Tier>;
 
 export const Endpoint = z.object({
   /** Provider slug accepted by `provider.only`, e.g. "openai/flex". */
@@ -18,17 +18,23 @@ export const Endpoint = z.object({
   status: z.number(),
   uptime: z.number().nullable(),
   reasoning: z.boolean(),
-})
-export type Endpoint = z.infer<typeof Endpoint>
+});
+export type Endpoint = z.infer<typeof Endpoint>;
 
 /** What is persisted per model: enough to route and to render the footer without refetching. */
-export const Choice = Endpoint.pick({ tag: true, provider: true, tier: true, input: true, output: true })
-export type Choice = z.infer<typeof Choice>
+export const Choice = Endpoint.pick({
+  tag: true,
+  provider: true,
+  tier: true,
+  input: true,
+  output: true,
+});
+export type Choice = z.infer<typeof Choice>;
 
-const model = z.string().describe("OpenRouter model id, e.g. openai/gpt-6-sol")
+const model = z.string().describe('OpenRouter model id, e.g. openai/gpt-6-sol');
 
 export const OpenRouterProviders = Rpc.define({
-  id: "openrouter-provider-manager",
+  id: 'openrouter-provider-manager',
   methods: {
     listEndpoints: {
       input: z.object({ model }),
@@ -50,6 +56,6 @@ export const OpenRouterProviders = Rpc.define({
   events: {
     choice: { schema: z.object({ model, choice: Choice.nullable() }) },
   },
-})
+});
 
-export default OpenRouterProviders
+export default OpenRouterProviders;
