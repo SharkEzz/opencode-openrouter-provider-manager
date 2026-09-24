@@ -14,8 +14,10 @@
   },
   "include": [
     "index.ts",
-    "tui.tsx",
     "rpc.ts",
-    "src/**/*.ts"
+    "src/**/*.ts",
+    "tests/**/*.ts",
+    "tui.tsx",
+    "vitest.config.ts"
   ]
 }

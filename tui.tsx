@@ -4,10 +4,11 @@ import path from "node:path"
 import { createEffect, createSignal, onCleanup, Show } from "solid-js"
 import { type Choice, type Endpoint, OpenRouterProviders } from "./rpc"
 import { degraded, price, summary, tokens } from "./src/format"
+import { AUTO, resolveQuery } from "./src/match"
+import { resolveModel } from "./src/model"
 import { MODEL_STATE_FILE, type ModelRef, pickedModel } from "./src/tui-state"
 
 const PROVIDER = "openrouter"
-const AUTO = "__auto__"
 const COMMAND = "openrouter.provider"
 const HOME = "__home__"
 
@@ -60,8 +61,12 @@ export default Plugin.define({
 
     /** A pick made on this screen, else the session's model; on the home screen, the last pick. */
     function currentModel(sessionID: string | undefined): ModelRef | undefined {
-      const key = sessionID ?? HOME
-      return picks[key] ?? (sessionID ? sessionModel(sessionID) : pickedModel()?.model)
+      return resolveModel({
+        sessionID,
+        sessionModel: sessionModel(sessionID),
+        pick: picks[sessionID ?? HOME],
+        lastPicked: () => pickedModel()?.model,
+      })
     }
 
     async function activeModel(): Promise<ModelRef | undefined> {
@@ -135,30 +140,26 @@ export default Plugin.define({
       }
 
       const current = stored.choice?.tag ?? AUTO
-      const q = query?.trim().toLowerCase()
-      let candidates = listed.endpoints
-      if (q) {
-        const exact = q === "auto" ? AUTO : listed.endpoints.find((e) => e.tag.toLowerCase() === q)?.tag
-        candidates = listed.endpoints.filter(
-          (e) => e.tag.toLowerCase().startsWith(q) || e.provider.toLowerCase().includes(q),
-        )
-        const direct = exact ?? (candidates.length === 1 ? candidates[0]!.tag : undefined)
-        if (direct) {
+      let candidates: readonly Endpoint[] = listed.endpoints
+      if (query?.trim()) {
+        const result = resolveQuery(query, listed.endpoints)
+        if (result.kind === "direct") {
           ctx.ui.dialog.clear()
-          if (direct !== current) await apply(model, direct, listed.endpoints)
-          else ctx.ui.toast.show({ title: "OpenRouter", message: `${model.id} utilise déjà ${direct === AUTO ? "le routage automatique" : direct}.`, variant: "info" })
+          if (result.value !== current) await apply(model, result.value, listed.endpoints)
+          else ctx.ui.toast.show({ title: "OpenRouter", message: `${model.id} utilise déjà ${result.value === AUTO ? "le routage automatique" : result.value}.`, variant: "info" })
           return
         }
-        if (candidates.length === 0) {
+        if (result.kind === "none") {
           ctx.ui.dialog.clear()
           const tags = listed.endpoints.map((e) => e.tag)
           ctx.ui.toast.show({
             title: "OpenRouter",
-            message: `Aucun endpoint « ${query!.trim()} » pour ${model.id}. Disponibles : auto, ${tags.slice(0, 8).join(", ")}${tags.length > 8 ? "…" : ""}`,
+            message: `Aucun endpoint « ${query.trim()} » pour ${model.id}. Disponibles : auto, ${tags.slice(0, 8).join(", ")}${tags.length > 8 ? "…" : ""}`,
             variant: "error",
           })
           return
         }
+        candidates = result.candidates
       }
 
       const selection = ctx.ui.dialog.select<string>({
@@ -167,7 +168,7 @@ export default Plugin.define({
         current,
         options: [
           // An ambiguous argument narrows the list to its matches.
-          ...(q
+          ...(candidates !== listed.endpoints
             ? []
             : [
                 {

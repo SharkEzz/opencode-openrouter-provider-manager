@@ -16,7 +16,12 @@ interface RawEndpoint {
 
 const cache = new Map<string, { at: number; endpoints: Endpoint[] }>()
 
-function perMillion(value: string | undefined): number | null {
+/** Test hook: forget every cached listing. */
+export function clearEndpointCache() {
+  cache.clear()
+}
+
+export function perMillion(value: string | undefined): number | null {
   if (value === undefined) return null
   const n = Number(value)
   // OpenRouter uses -1 for "variable pricing" (e.g. the auto router).
@@ -24,14 +29,14 @@ function perMillion(value: string | undefined): number | null {
   return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e12) / 1e6 : null
 }
 
-function tierOf(tag: string): Tier {
+export function tierOf(tag: string): Tier {
   const suffix = tag.split("/")[1]
   if (suffix === "flex") return "flex"
   if (suffix === "fast" || suffix === "priority") return "priority"
   return "default"
 }
 
-function normalize(raw: RawEndpoint): Endpoint | undefined {
+export function normalize(raw: RawEndpoint): Endpoint | undefined {
   if (!raw.tag) return undefined
   return {
     tag: raw.tag,

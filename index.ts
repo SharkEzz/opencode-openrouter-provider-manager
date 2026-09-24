@@ -2,6 +2,7 @@ import { Plugin } from "@opencode/plugin"
 import { Choice, OpenRouterProviders } from "./rpc"
 import { DEBUG_LOG, logRequest } from "./src/debug"
 import { fetchEndpoints } from "./src/openrouter"
+import { pinProvider } from "./src/pin"
 
 const PROVIDER = "openrouter"
 
@@ -58,18 +59,15 @@ export default Plugin.define({
 
         const body = (await request.clone().json().catch(() => undefined)) as Record<string, unknown> | undefined
         if (!body || typeof body !== "object") return
+        const sent = choice ? pinProvider(body, choice.tag) : body
         if (choice) {
-          const provider = (body.provider ?? {}) as Record<string, unknown>
-          delete provider.order
-          body.provider = { ...provider, only: [choice.tag], allow_fallbacks: false }
-
           const headers = new Headers(request.headers)
           headers.delete("content-length")
-          event.request = new Request(request, { headers, body: JSON.stringify(body) })
+          event.request = new Request(request, { headers, body: JSON.stringify(sent) })
         }
         // Logged after the rewrite: this is exactly what leaves for OpenRouter.
         if (debug) {
-          await logRequest({ kind: event.kind, model: event.model.id, sessionID: event.sessionID, body }).catch(() => {})
+          await logRequest({ kind: event.kind, model: event.model.id, sessionID: event.sessionID, body: sent }).catch(() => {})
         }
       },
       { providerID: PROVIDER },
