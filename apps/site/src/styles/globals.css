@@ -60,9 +60,9 @@
   --color-surface-hover: var(--surface-hover);
   --color-surface-selected: var(--surface-selected);
   --color-text-primary: var(--text-primary);
-  --color-text-secondary: var(--text-secondary);
-  --color-text-muted: var(--text-muted);
-  --color-text-faint: var(--text-faint);
+  --color-text-secondary: var(--site-text-secondary);
+  --color-text-muted: var(--site-text-muted);
+  --color-text-faint: var(--site-text-faint);
   --color-text-on-accent: var(--text-on-accent);
   --color-hairline: var(--hairline);
   --color-border-strong: var(--border-strong);
@@ -121,14 +121,32 @@
 
 :root {
   /* Hero bloom strength per accent. Deviation: the design system allows blue/cyan only. */
-  --halo-route: 22%;
-  --halo-telemetry: 30%;
-  --halo-meta: 18%;
+  --halo-route: 44%;
+  --halo-telemetry: 56%;
+  --halo-meta: 38%;
+}
+/* Light theme tweaks, derived from the semantic aliases (to be discussed upstream): body text a
+   notch darker (each ink pulled toward --text-primary), and a soft lift under docked panels
+   (the design system keeps docked surfaces shadowless; on white they read flat). */
+:root {
+  --site-text-secondary: var(--text-secondary);
+  --site-text-muted: var(--text-muted);
+  --site-text-faint: var(--text-faint);
+  --panel-shadow: none;
 }
 [data-theme='light'] {
-  --halo-route: 12%;
-  --halo-telemetry: 12%;
-  --halo-meta: 8%;
+  --site-text-secondary: color-mix(in srgb, var(--text-secondary) 60%, var(--text-primary));
+  --site-text-muted: color-mix(in srgb, var(--text-muted) 65%, var(--text-primary));
+  --site-text-faint: color-mix(in srgb, var(--text-faint) 75%, var(--text-primary));
+  --panel-shadow:
+    0 1px 2px color-mix(in srgb, var(--text-primary) 6%, transparent),
+    0 8px 24px color-mix(in srgb, var(--text-primary) 8%, transparent);
+}
+
+[data-theme='light'] {
+  --halo-route: 40%;
+  --halo-telemetry: 40%;
+  --halo-meta: 28%;
 }
 
 @layer components {
@@ -234,26 +252,11 @@ section[id] {
   }
 }
 
-/* HUD scroll progress. `scaleX` rather than `width` (the design system's list) to stay off the
-   layout path on every frame. No fallback: decorative. */
-.scroll-progress {
-  position: absolute;
-  inset: auto 0 -1px;
-  height: 1px;
-  background: var(--accent-telemetry-ink);
-  transform: scaleX(0);
-  transform-origin: left;
-}
-@supports (animation-timeline: scroll()) {
-  .scroll-progress {
-    animation: progress linear both;
-    animation-timeline: scroll(root);
-  }
-}
-@keyframes progress {
-  to {
-    transform: scaleX(1);
-  }
+/* Backdrop of the header and hero: about 1.5 viewports tall, faded out at the bottom so the
+   blooms spill into the benchmark section without a hard edge. */
+.hero-backdrop {
+  height: max(1400px, 150vh);
+  mask-image: linear-gradient(to bottom, black 55%, transparent);
 }
 
 /* Hero blooms. Deviation: slow drift (the design system has no ambient motion). Transforms
@@ -263,7 +266,7 @@ section[id] {
   width: min(900px, 90vw);
   aspect-ratio: 1;
   border-radius: 9999px;
-  animation: drift 32s ease-in-out infinite alternate;
+  animation: drift 7.5s ease-in-out infinite alternate;
 }
 .halo-route {
   top: -35%;
@@ -273,7 +276,7 @@ section[id] {
     color-mix(in srgb, var(--accent-route) var(--halo-route), transparent),
     transparent
   );
-  animation-duration: 28s;
+  animation-duration: 6s;
 }
 .halo-telemetry {
   top: 15%;
@@ -283,7 +286,7 @@ section[id] {
     color-mix(in srgb, var(--accent-telemetry) var(--halo-telemetry), transparent),
     transparent
   );
-  animation-duration: 36s;
+  animation-duration: 7.5s;
   animation-direction: alternate-reverse;
 }
 .halo-meta {
@@ -294,17 +297,20 @@ section[id] {
     color-mix(in srgb, var(--accent-meta) var(--halo-meta), transparent),
     transparent
   );
-  animation-duration: 40s;
+  animation-duration: 9s;
 }
 @keyframes drift {
   from {
     transform: translate(0, 0);
   }
-  50% {
-    transform: translate(6%, 4%);
+  35% {
+    transform: translate(14%, 6%);
+  }
+  70% {
+    transform: translate(4%, 14%);
   }
   to {
-    transform: translate(-4%, 7%);
+    transform: translate(-10%, 8%);
   }
 }
 
@@ -335,7 +341,7 @@ section[id] {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  *:not(.scroll-progress),
+  *,
   ::before,
   ::after {
     animation: none !important;

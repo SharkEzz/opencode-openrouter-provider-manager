@@ -1,13 +1,11 @@
 import { ChartScatter } from 'lucide-react';
 import { CopyCommand } from '@/components/CopyCommand';
-import { HeroBackdrop } from '@/components/HeroBackdrop';
 import { HeroPicker } from '@/components/HeroPicker';
 import { REPO_URL } from './Header';
 
 export function Hero() {
   return (
-    <section id="top" className="relative isolate -mt-14 pt-14">
-      <HeroBackdrop />
+    <section id="top">
       <div className="mx-auto grid max-w-6xl grid-cols-[minmax(0,1fr)] justify-items-center gap-6 px-4 pt-16 pb-20 text-center">
         <span className="label-sm inline-flex items-center gap-2 rounded-full border border-hairline bg-surface-app/60 px-3 py-1 text-telemetry-ink normal-case">
           <span className="size-1.5 rounded-full bg-telemetry-ink" />

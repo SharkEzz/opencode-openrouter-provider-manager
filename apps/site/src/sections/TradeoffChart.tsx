@@ -7,7 +7,7 @@ import { ms } from '@/lib/format';
 import type { Selection } from './Benchmark';
 
 const WORKLOADS = ['short', 'long', 'agentic', 'big-context'] as const;
-const AXIS = { fill: 'var(--text-faint)', fontSize: 11, fontFamily: 'var(--font-mono)' };
+const AXIS = { fill: 'var(--site-text-faint)', fontSize: 11, fontFamily: 'var(--font-mono)' };
 
 const isPoint = (value: unknown): value is Point =>
   typeof value === 'object' && value !== null && 'config' in value && 'fill' in value;
@@ -47,7 +47,7 @@ export function TradeoffChart({
             error: [p50 - ci50[0], ci50[1] - p50],
             fill:
               config === 'auto'
-                ? 'var(--text-muted)'
+                ? 'var(--site-text-muted)'
                 : config === strategy
                   ? 'var(--accent-route-ink)'
                   : 'var(--accent-telemetry-ink)',
@@ -125,7 +125,7 @@ export function TradeoffChart({
                 />
               );
             }}>
-            <ErrorBar dataKey="error" direction="x" stroke="var(--text-faint)" width={4} />
+            <ErrorBar dataKey="error" direction="x" stroke="var(--site-text-faint)" width={4} />
           </Scatter>
         </ScatterChart>
       </ChartContainer>

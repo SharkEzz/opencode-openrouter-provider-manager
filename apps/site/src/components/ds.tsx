@@ -34,7 +34,7 @@ export function Panel({
   return (
     <section
       className={cn(
-        'flex min-h-0 flex-col overflow-hidden rounded-md border border-hairline',
+        'flex min-h-0 flex-col overflow-hidden rounded-md border border-hairline shadow-(--panel-shadow)',
         PANEL_TONES[tone],
         className,
       )}>
@@ -83,7 +83,7 @@ const BADGE_TONES: Record<BadgeTone, CSSProperties> = {
     borderColor: 'var(--status-fault-bg)',
   },
   neutral: {
-    color: 'var(--text-muted)',
+    color: 'var(--site-text-muted)',
     background: 'var(--surface-raised)',
     borderColor: 'var(--hairline)',
   },

@@ -70,7 +70,6 @@ export function Header() {
           </a>
         </div>
       </div>
-      <div className="scroll-progress" aria-hidden />
     </header>
   );
 }

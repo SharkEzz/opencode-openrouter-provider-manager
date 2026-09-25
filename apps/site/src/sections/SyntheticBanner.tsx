@@ -1,9 +1,10 @@
-import { useData } from '@/lib/data';
+import { use } from 'react';
+import { summaryPromise } from '@/lib/data';
 
-/** Always visible while the data is generated (SPEC §11.8). */
+/** Top-of-page notice while the data is generated (SPEC §11.8). Wrap in <Suspense>. */
 export function SyntheticBanner() {
-  const { summary } = useData();
-  if (!summary.run.synthetic) return null;
+  const summary = use(summaryPromise);
+  if (!summary?.run.synthetic) return null;
   return (
     <div
       role="status"
