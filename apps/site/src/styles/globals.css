@@ -115,3 +115,230 @@
 
 /* shadcn's `dark:` utilities must follow the site toggle, not the OS preference. */
 @custom-variant dark (&:where(:root:not([data-theme='light']), :root:not([data-theme='light']) *));
+
+/* ---- Effects. Motion follows the design system (90/140/220ms on --ease-out) except where a
+   comment says otherwise; every deviation is listed in the PR for upstream discussion. ---- */
+
+:root {
+  /* Hero bloom strength per accent. Deviation: the design system allows blue/cyan only. */
+  --halo-route: 22%;
+  --halo-telemetry: 30%;
+  --halo-meta: 18%;
+}
+[data-theme='light'] {
+  --halo-route: 12%;
+  --halo-telemetry: 12%;
+  --halo-meta: 8%;
+}
+
+@layer components {
+  .btn-primary,
+  .btn-secondary {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.5rem;
+    border-radius: var(--radius-md);
+    white-space: nowrap;
+    transition:
+      background-color var(--dur) var(--ease-out),
+      border-color var(--dur) var(--ease-out),
+      color var(--dur) var(--ease-out),
+      box-shadow var(--dur) var(--ease-out);
+  }
+  .btn-primary {
+    border: none;
+    background: var(--accent-route);
+    color: var(--text-on-accent);
+    font-weight: 600;
+  }
+  /* Design system hover: fill ~12% brighter plus a blue glow. */
+  .btn-primary:hover {
+    background: color-mix(in srgb, var(--accent-route) 88%, white);
+    box-shadow: var(--glow-blue);
+  }
+  .btn-secondary {
+    border: 1px solid var(--border-strong);
+    background: var(--surface-input);
+    color: var(--text-primary);
+  }
+  .btn-secondary:hover {
+    background: var(--surface-hover);
+    border-color: var(--accent-telemetry-ink);
+  }
+  :is(.btn-primary, .btn-secondary):active {
+    translate: 0 0.5px;
+  }
+  :is(.btn-primary, .btn-secondary):focus-visible {
+    outline: none;
+    box-shadow: var(--focus-ring);
+  }
+
+  /* Deviation: text gradient (the design system keeps gradients to the app background). */
+  .text-gradient-accent {
+    background: linear-gradient(90deg, var(--accent-route-ink), var(--accent-telemetry-ink));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+
+  /* The page's single ping (design system: at most one visible at a time). */
+  .ping-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    flex-shrink: 0;
+    border-radius: 9999px;
+    background: var(--status-ok);
+    animation: ping 1.8s var(--ease-out) infinite;
+  }
+}
+
+@keyframes ping {
+  from {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--status-ok) 60%, transparent);
+  }
+  to {
+    box-shadow: 0 0 0 6px transparent;
+  }
+}
+
+/* Anchored sections land below the sticky header. */
+section[id] {
+  scroll-margin-top: 3.5rem;
+}
+
+/* Sticky header: transparent over the hero, floating glass once stuck. Deviation: the design
+   system keeps blur for z-level 2+; a stuck header floats over the content like one. */
+.site-header {
+  container-type: scroll-state;
+}
+.site-header-bar {
+  border-bottom: 1px solid transparent;
+  transition:
+    background-color var(--dur-slow) var(--ease-out),
+    border-color var(--dur-slow) var(--ease-out);
+}
+@container scroll-state(stuck: top) {
+  .site-header-bar {
+    background: var(--glass-fill);
+    backdrop-filter: var(--glass-blur);
+    border-bottom-color: var(--rim-electric);
+  }
+}
+@supports not (container-type: scroll-state) {
+  .site-header-bar {
+    background: var(--glass-fill);
+    backdrop-filter: var(--glass-blur);
+    border-bottom-color: var(--rim-electric);
+  }
+}
+
+/* HUD scroll progress. `scaleX` rather than `width` (the design system's list) to stay off the
+   layout path on every frame. No fallback: decorative. */
+.scroll-progress {
+  position: absolute;
+  inset: auto 0 -1px;
+  height: 1px;
+  background: var(--accent-telemetry-ink);
+  transform: scaleX(0);
+  transform-origin: left;
+}
+@supports (animation-timeline: scroll()) {
+  .scroll-progress {
+    animation: progress linear both;
+    animation-timeline: scroll(root);
+  }
+}
+@keyframes progress {
+  to {
+    transform: scaleX(1);
+  }
+}
+
+/* Hero blooms. Deviation: slow drift (the design system has no ambient motion). Transforms
+   only, so the compositor moves them without repainting. */
+.halo {
+  position: absolute;
+  width: min(900px, 90vw);
+  aspect-ratio: 1;
+  border-radius: 9999px;
+  animation: drift 32s ease-in-out infinite alternate;
+}
+.halo-route {
+  top: -35%;
+  left: 20%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--accent-route) var(--halo-route), transparent),
+    transparent
+  );
+  animation-duration: 28s;
+}
+.halo-telemetry {
+  top: 15%;
+  left: -25%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--accent-telemetry) var(--halo-telemetry), transparent),
+    transparent
+  );
+  animation-duration: 36s;
+  animation-direction: alternate-reverse;
+}
+.halo-meta {
+  bottom: -20%;
+  right: -20%;
+  background: radial-gradient(
+    closest-side,
+    color-mix(in srgb, var(--accent-meta) var(--halo-meta), transparent),
+    transparent
+  );
+  animation-duration: 40s;
+}
+@keyframes drift {
+  from {
+    transform: translate(0, 0);
+  }
+  50% {
+    transform: translate(6%, 4%);
+  }
+  to {
+    transform: translate(-4%, 7%);
+  }
+}
+
+/* Floating route palette of the hero. Deviation: a slow 4px float. */
+.hero-palette {
+  background: var(--glass-fill);
+  backdrop-filter: var(--glass-blur);
+  border: var(--glass-border);
+  border-top: var(--glass-rim);
+  box-shadow: var(--shadow-float);
+  animation: float 6s ease-in-out infinite alternate;
+}
+@keyframes float {
+  from {
+    transform: translateY(-4px);
+  }
+  to {
+    transform: translateY(4px);
+  }
+}
+
+/* Theme switch: the new theme is revealed by a clip-path circle (theme.ts), not cross-faded.
+   Deviation: the design system has no theme transition. */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *:not(.scroll-progress),
+  ::before,
+  ::after {
+    animation: none !important;
+    transition: none !important;
+  }
+}

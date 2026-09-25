@@ -5,7 +5,7 @@
  * `--badge-*` aliases (globals.css); the upstream Badge reads raw `--obs-*` tokens, which stay
  * pale in the light theme.
  */
-import type { CSSProperties, ReactNode } from 'react';
+import type { CSSProperties, MouseEvent, ReactNode } from 'react';
 import { cn } from 'cn';
 
 const PANEL_TONES = {
@@ -166,7 +166,7 @@ export function IconButton({
   children,
 }: {
   label: string;
-  onClick?: () => void;
+  onClick?: (event: MouseEvent<HTMLButtonElement>) => void;
   children: ReactNode;
 }) {
   return (
@@ -175,7 +175,7 @@ export function IconButton({
       aria-label={label}
       title={label}
       onClick={onClick}
-      className="inline-grid size-7 cursor-pointer place-items-center rounded-md border border-transparent text-text-muted transition-colors duration-[140ms] ease-out hover:bg-surface-hover hover:text-telemetry-ink">
+      className="inline-grid size-7 cursor-pointer place-items-center rounded-md border border-transparent text-text-muted transition-[background-color,color,box-shadow] duration-[140ms] ease-out hover:bg-surface-hover hover:text-telemetry-ink focus-visible:shadow-[var(--focus-ring)] focus-visible:outline-none active:translate-y-[0.5px]">
       {children}
     </button>
   );

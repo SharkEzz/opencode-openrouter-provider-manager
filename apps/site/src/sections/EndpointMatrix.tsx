@@ -39,7 +39,7 @@ export function EndpointMatrix({ model }: { model: string }) {
           {rows.map(({ config, short, big, endpoint, reliability }) => (
             <tr
               key={config}
-              className="h-9 border-b border-hairline last:border-none hover:bg-surface-hover">
+              className="h-9 border-b border-hairline transition-colors duration-[90ms] ease-out last:border-none hover:bg-surface-hover">
               <td className="px-3 text-text-primary">{short?.tag ?? 'auto'}</td>
               <td className="px-3 text-right">
                 {endpoint?.input != null ? pricePerM(endpoint.input) : '—'}
