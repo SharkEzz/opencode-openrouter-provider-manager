@@ -61,7 +61,7 @@ export function Observed() {
                 {rows.map((row) => (
                   <tr
                     key={`${row.permaslug}·${row.provider}`}
-                    className={`h-8 border-b border-hairline last:border-none ${row.requests < MIN_REQUESTS ? 'text-text-faint' : ''}`}>
+                    className={`h-8 border-b border-hairline transition-colors duration-[90ms] ease-out last:border-none hover:bg-surface-hover ${row.requests < MIN_REQUESTS ? 'text-text-faint' : ''}`}>
                     <td className="px-3">{row.provider}</td>
                     <td className="px-3 text-right">{row.requests.toLocaleString('en-US')}</td>
                     <td className="px-3 text-right text-telemetry-ink">

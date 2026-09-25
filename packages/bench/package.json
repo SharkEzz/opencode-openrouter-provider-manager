@@ -12,12 +12,11 @@
   "scripts": {
     "bench:fake": "node fake-summary.ts",
     "bench:observe": "node observe.ts",
-    "typecheck": "tsc --noEmit",
     "test": "vitest run"
   },
   "dependencies": {
     "opencode-openrouter-provider-manager": "workspace:*",
-    "zod": "^4.1.8"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

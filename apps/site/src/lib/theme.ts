@@ -1,4 +1,5 @@
 import { useEffect, useEffectEvent, useSyncExternalStore } from 'react';
+import { prefersReducedMotion } from './motion';
 
 export type Theme = 'dark' | 'light';
 
@@ -26,6 +27,37 @@ function stored(): Theme | null {
   }
 }
 
+/**
+ * Reveals the new theme in a circle growing from `origin` (a View Transition clip, not a fade).
+ * Falls back to an instant switch without the API or under reduced motion.
+ */
+function switchTo(theme: Theme, origin?: { x: number; y: number }) {
+  if (!origin || !document.startViewTransition || prefersReducedMotion()) {
+    apply(theme);
+    return;
+  }
+  const radius = Math.hypot(
+    Math.max(origin.x, innerWidth - origin.x),
+    Math.max(origin.y, innerHeight - origin.y),
+  );
+  const transition = document.startViewTransition(() => apply(theme));
+  void transition.ready.then(() =>
+    root().animate(
+      {
+        clipPath: [
+          `circle(0px at ${origin.x}px ${origin.y}px)`,
+          `circle(${radius}px at ${origin.x}px ${origin.y}px)`,
+        ],
+      },
+      {
+        duration: 400,
+        easing: 'cubic-bezier(.2,.8,.3,1)',
+        pseudoElement: '::view-transition-new(root)',
+      },
+    ),
+  );
+}
+
 export function useTheme() {
   const theme = useSyncExternalStore(subscribe, read, () => 'dark' as const);
 
@@ -39,9 +71,10 @@ export function useTheme() {
     return () => query.removeEventListener('change', onSystemChange);
   }, []);
 
-  const toggle = () => {
+  /** `origin`: viewport point the reveal grows from (the toggle button). */
+  const toggle = (origin?: { x: number; y: number }) => {
     const next: Theme = theme === 'light' ? 'dark' : 'light';
-    apply(next);
+    switchTo(next, origin);
     try {
       localStorage.setItem('theme', next);
     } catch {

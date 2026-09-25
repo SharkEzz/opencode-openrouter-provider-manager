@@ -8,7 +8,7 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
-import { Tabs, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Tabs, TabsIndicator, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { blendedPerM, type Profile, STRATEGIES, type StrategyId, useData } from '@/lib/data';
 import { change, ms, pct, shortModel, tokens, tps, usd } from '@/lib/format';
 import { EndpointMatrix } from './EndpointMatrix';
@@ -61,12 +61,14 @@ export function Benchmark() {
       <Panel title="controls">
         <div className="grid gap-4">
           <Tabs
+            className="min-w-0"
             value={active}
             onValueChange={(value) => {
               const next = STRATEGIES.find((s) => s.id === value);
               if (next) setStrategy(next.id);
             }}>
-            <TabsList className="h-9 rounded-md bg-surface-pane">
+            <TabsList className="relative h-9 max-w-full justify-start overflow-x-auto rounded-md [scrollbar-width:none] bg-surface-pane">
+              <TabsIndicator className="rounded-md bg-route shadow-[var(--glow-blue)]" />
               {STRATEGIES.map((s) => {
                 const tag = tagOf(model, s.id);
                 return (
@@ -77,7 +79,7 @@ export function Benchmark() {
                     title={
                       available.includes(s.id) ? undefined : `no ${s.label} endpoint for this model`
                     }
-                    className="body-sm rounded-md data-active:bg-route data-active:font-semibold data-active:text-text-on-accent dark:data-active:border-transparent dark:data-active:bg-route dark:data-active:text-text-on-accent">
+                    className="body-sm z-10 rounded-md transition-colors duration-[140ms] ease-out data-active:bg-transparent data-active:font-semibold data-active:text-text-on-accent data-active:shadow-none dark:data-active:border-transparent dark:data-active:bg-transparent dark:data-active:text-text-on-accent">
                     {s.label}
                     {tag && <span className="opacity-70">{tag}</span>}
                   </TabsTrigger>

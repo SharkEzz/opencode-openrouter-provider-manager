@@ -11,4 +11,10 @@ export default defineConfig(({ mode, command }) => ({
   resolve: {
     alias: { '@': path.join(import.meta.dirname, 'src') },
   },
+  appType: 'spa',
+  build: {
+    emptyOutDir: true,
+    cssCodeSplit: false,
+    sourcemap: false,
+  },
 }));
