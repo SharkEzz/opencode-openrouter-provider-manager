@@ -4,13 +4,13 @@ An OpenCode V2 plugin that pins a specific OpenRouter endpoint per model, plus t
 
 This repository is a [pnpm](https://pnpm.io) workspace:
 
-| Path                      | Package                       | Contents                                                             |
-| ------------------------- | ----------------------------- | -------------------------------------------------------------------- |
-| `packages/plugin/`        | `openrouter-provider-manager` | the OpenCode plugin; see its [README](packages/plugin/README.md)     |
-| `packages/bench/`         | `@orpm/bench`                 | the Auto vs pinned benchmark; see its [spec](packages/bench/SPEC.md) |
-| `packages/design-system/` | `@orpm/design-system`         | tokens and components of the Obsidian Cyber IDE design system        |
-| `apps/site/`              | `@orpm/site`                  | presentation site (planned)                                          |
-| `apps/docs/`              | `@orpm/docs`                  | documentation (planned)                                              |
+| Path                      | Package                                | Contents                                                             |
+| ------------------------- | -------------------------------------- | -------------------------------------------------------------------- |
+| `packages/plugin/`        | `opencode-openrouter-provider-manager` | the OpenCode plugin; see its [README](packages/plugin/README.md)     |
+| `packages/bench/`         | `@orpm/bench`                          | the Auto vs pinned benchmark; see its [spec](packages/bench/SPEC.md) |
+| `packages/design-system/` | `@orpm/design-system`                  | tokens and components of the Obsidian Cyber IDE design system        |
+| `apps/site/`              | `@orpm/site`                           | presentation site (`pnpm --filter @orpm/site dev`)                   |
+| `apps/docs/`              | `@orpm/docs`                           | documentation (planned)                                              |
 
 ## Development
 

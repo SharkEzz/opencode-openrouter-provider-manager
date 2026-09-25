@@ -8,7 +8,7 @@ Choose the OpenRouter endpoint used by each model from inside OpenCode. The plug
 
 ## Install from a local checkout
 
-This repository is not published yet. You need OpenCode V2 and an OpenRouter account. Node.js 26 is the tested development version for this source checkout.
+The package is not published on npm yet; the source is on GitHub at [SharkEzz/opencode-openrouter-provider-manager](https://github.com/SharkEzz/opencode-openrouter-provider-manager). You need OpenCode V2 and an OpenRouter account. Node.js 26 is the tested development version for this source checkout.
 
 1. In a checkout of this repository, install the locked dependencies with [pnpm](https://pnpm.io) from the repository root:
 
@@ -39,7 +39,7 @@ The planned package name is `opencode-openrouter-provider-manager`. Once it is p
 opencode plugin add opencode-openrouter-provider-manager
 ```
 
-This command is **not available yet**. The planned GitHub repository is `SharkEzz/opencode-openrouter-provider-manager`; it is not linked here until it exists.
+This command is **not available yet**.
 
 ## Use the picker
 
@@ -75,7 +75,8 @@ It leaves the model variant's reasoning settings and the rest of the request int
 - [x] Add the terminal picker, per-model endpoint pins, and Auto routing.
 - [ ] Integrate with the OpenCode web environment.
 - [ ] Integrate with the OpenCode IDE environment.
-- [ ] Publish the package on npm and the repository on GitHub.
+- [x] Publish the repository on GitHub.
+- [ ] Publish the package on npm.
 - [ ] Add automated TUI checks for filtering and endpoint colors across OpenCode updates.
 
 ## Development

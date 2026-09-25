@@ -6,6 +6,7 @@
   "endOfLine": "lf",
   "ignorePatterns": [
     "node_modules",
+    "dist",
     "plans",
     "packages/design-system",
     "packages/bench/observed",

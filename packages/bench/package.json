@@ -16,7 +16,7 @@
     "test": "vitest run"
   },
   "dependencies": {
-    "openrouter-provider-manager": "workspace:*",
+    "opencode-openrouter-provider-manager": "workspace:*",
     "zod": "^4.1.8"
   },
   "devDependencies": {
