@@ -12,26 +12,6 @@ allowBuilds:
 # explicitly turns on strict mode, so a too-recent version fails the install instead of being
 # silently added to the exclusions below (pnpm's non-strict default).
 minimumReleaseAge: 1440
-
-# Deliberate exceptions only. @opencode/* 2.0.16 is the OpenCode host version the plugin is
-# tested against; oxlint-tsgolint 7.0.2003 is the linter in use. Both were under 24 h old when
-# added (2026-09-24) and can be removed once mature.
-minimumReleaseAgeExclude:
-  - '@opencode/ai@2.0.16'
-  - '@opencode/client@2.0.16'
-  - '@opencode/plugin@2.0.16'
-  - '@opencode/protocol@2.0.16'
-  - '@opencode/schema@2.0.16'
-  - '@opencode/theme@2.0.16'
-  - '@opencode/util@2.0.16'
-  - '@oxlint-tsgolint/darwin-arm64@7.0.2003'
-  - '@oxlint-tsgolint/darwin-x64@7.0.2003'
-  - '@oxlint-tsgolint/linux-arm64@7.0.2003'
-  - '@oxlint-tsgolint/linux-x64@7.0.2003'
-  - '@oxlint-tsgolint/win32-arm64@7.0.2003'
-  - '@oxlint-tsgolint/win32-x64@7.0.2003'
-  - oxlint-tsgolint@7.0.2003
-
 peerDependencyRules:
   allowedVersions:
     # Pulled in by @opentui/core; only its type declarations touch TypeScript.

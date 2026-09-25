@@ -18,13 +18,12 @@
     "./pin": "./src/pin.ts"
   },
   "scripts": {
-    "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage"
   },
   "dependencies": {
-    "zod": "^4.1.8"
+    "zod": "^4.6.5"
   },
   "devDependencies": {
     "@opencode/plugin": "^2.0.16",

@@ -3,13 +3,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "typecheck": "pnpm -r --if-present typecheck",
+    "typecheck": "tsc -b --noEmit",
     "test": "pnpm -r --if-present test",
     "test:coverage": "pnpm -r --if-present test:coverage",
     "format": "oxfmt",
     "format:check": "oxfmt --check",
     "lint": "oxlint --fix",
-    "lint:check": "oxlint"
+    "lint:check": "oxlint",
+    "clean": "tsc -b --clean && pnpm run -r --if-present clean"
   },
   "devDependencies": {
     "@types/node": "^26.6.2",

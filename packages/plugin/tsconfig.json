@@ -1,4 +1,9 @@
 {
-  "files": [],
-  "references": [{ "path": "./tsconfig.test.json" }, { "path": "./tsconfig.app.json" }]
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "tsBuildInfoFile": "./node_modules/.tsbuildinfo",
+    "types": ["node", "@opentui/solid"],
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid"
+  }
 }

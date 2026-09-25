@@ -1,13 +1,14 @@
 {
   "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "lib": ["ESNext", "DOM"],
     "types": ["node", "vite/client"],
     "jsx": "react-jsx",
     "module": "esnext",
     "moduleResolution": "bundler",
     "paths": { "@/*": ["./src/*"] },
-    "allowImportingTsExtensions": true
+    "allowImportingTsExtensions": true,
+    "tsBuildInfoFile": "./node_modules/.tsbuildinfo"
   },
   "include": ["src", "vite.config.ts", "plugins"]
 }
