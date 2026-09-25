@@ -4,11 +4,10 @@
     "lib": ["ESNext", "DOM", "DOM.Iterable"],
     "types": ["node", "vite/client"],
     "jsx": "react-jsx",
-    "resolveJsonModule": true,
     "module": "esnext",
     "moduleResolution": "bundler",
-    "allowImportingTsExtensions": true,
-    "paths": { "@/*": ["./src/*"] }
+    "paths": { "@/*": ["./src/*"] },
+    "allowImportingTsExtensions": true
   },
-  "include": ["src", "vite.config.ts"]
+  "include": ["src", "vite.config.ts", "plugins"]
 }

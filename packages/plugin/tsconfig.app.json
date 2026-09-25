@@ -1,7 +1,10 @@
 {
-  "extends": "./tsconfig.base.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/app.tsbuildInfo"
+    "tsBuildInfoFile": "./node_modules/app.tsbuildInfo",
+    "types": ["node", "@opentui/solid"],
+    "jsx": "preserve",
+    "jsxImportSource": "@opentui/solid"
   },
   "include": ["index.ts", "rpc.ts", "src", "tui.tsx"]
 }

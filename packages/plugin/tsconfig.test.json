@@ -1,7 +1,8 @@
 {
-  "extends": "./tsconfig.base.json",
+  "extends": "../../tsconfig.base.json",
   "compilerOptions": {
-    "tsBuildInfoFile": "./node_modules/test.tsbuildInfo"
+    "tsBuildInfoFile": "./node_modules/test.tsbuildInfo",
+    "types": ["node"]
   },
   "include": ["vitest.config.ts", "tests"]
 }

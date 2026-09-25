@@ -1,3 +1,5 @@
+[Design system colors](assets/ds-colors.png)
+
 # Obsidian Cyber IDE — Design System
 
 A developer-first command surface for an AI-native IDE: model routing, provider telemetry, MCP
