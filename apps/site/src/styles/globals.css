@@ -15,6 +15,15 @@
 :root {
   --font-sans: 'Inter Variable', system-ui, -apple-system, 'Segoe UI', sans-serif;
   --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+
+  /* Badge tints derived from the semantic accent fills, so a theme override of those follows.
+     Identical to the design system's raw 20%/30% tints (--obs-blue-20…). To be added upstream. */
+  --badge-route-bg: color-mix(in srgb, var(--accent-route) 20%, transparent);
+  --badge-route-border: color-mix(in srgb, var(--accent-route) 30%, transparent);
+  --badge-telemetry-bg: color-mix(in srgb, var(--accent-telemetry) 20%, transparent);
+  --badge-telemetry-border: color-mix(in srgb, var(--accent-telemetry) 20%, transparent);
+  --badge-meta-bg: color-mix(in srgb, var(--accent-meta) 20%, transparent);
+  --badge-meta-border: color-mix(in srgb, var(--accent-meta) 20%, transparent);
 }
 
 /* The design system's base.css pins `color-scheme: dark`; the light theme must reset it so

@@ -1,8 +1,9 @@
 /**
  * TSX ports of the design system primitives the site needs (packages/design-system/components).
  * They read semantic aliases only, so both themes work. One deliberate deviation: Badge inks use
- * `--accent-*-ink` as in `guidelines/light-badges.html`; the upstream Badge reads raw `--obs-*`
- * tokens, which stay pale in the light theme.
+ * `--accent-*-ink` as in `guidelines/light-badges.html`, and its tints come from the site's
+ * `--badge-*` aliases (globals.css); the upstream Badge reads raw `--obs-*` tokens, which stay
+ * pale in the light theme.
  */
 import type { CSSProperties, ReactNode } from 'react';
 import { cn } from 'cn';
@@ -53,18 +54,18 @@ export function Panel({
 const BADGE_TONES: Record<BadgeTone, CSSProperties> = {
   route: {
     color: 'var(--accent-route-ink)',
-    background: 'var(--obs-blue-20)',
-    borderColor: 'var(--obs-blue-30)',
+    background: 'var(--badge-route-bg)',
+    borderColor: 'var(--badge-route-border)',
   },
   telemetry: {
     color: 'var(--accent-telemetry-ink)',
-    background: 'var(--obs-cyan-20)',
-    borderColor: 'var(--obs-cyan-20)',
+    background: 'var(--badge-telemetry-bg)',
+    borderColor: 'var(--badge-telemetry-border)',
   },
   meta: {
     color: 'var(--accent-meta-ink)',
-    background: 'var(--obs-magenta-20)',
-    borderColor: 'var(--obs-magenta-20)',
+    background: 'var(--badge-meta-bg)',
+    borderColor: 'var(--badge-meta-border)',
   },
   ok: {
     color: 'var(--status-ok)',
