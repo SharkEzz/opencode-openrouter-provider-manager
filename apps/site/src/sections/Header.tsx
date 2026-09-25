@@ -3,7 +3,7 @@ import { cn } from 'cn';
 import { IconButton } from '@/components/ds';
 import { useActiveSection } from '@/lib/sections';
 import { useTheme } from '@/lib/theme';
-import plugin from '../../../../packages/plugin/package.json';
+import plugin from 'opencode-openrouter-provider-manager/package.json';
 
 export const REPO_URL = 'https://github.com/SharkEzz/opencode-openrouter-provider-manager';
 

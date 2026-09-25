@@ -15,7 +15,8 @@
     "./tui": "./tui.tsx",
     "./rpc": "./rpc.ts",
     "./openrouter": "./src/openrouter.ts",
-    "./pin": "./src/pin.ts"
+    "./pin": "./src/pin.ts",
+    "./package.json": "./package.json"
   },
   "scripts": {
     "test": "vitest run",
