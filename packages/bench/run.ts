@@ -39,6 +39,7 @@ import { Budget, buildPlan, type Cell, cellKey, estimate, reserve, type Unit } f
 import { profileFromObserved } from './profiles.ts';
 import {
   appendLines,
+  appendProviders,
   readLines,
   readMeta,
   type ResolvedModel,
@@ -93,7 +94,7 @@ export function cellsOf(
 ): Cell[] {
   return models.flatMap((m) =>
     workloads.flatMap((workload) =>
-      effortsOf(workload, m.class)
+      effortsOf(workload, m.model)
         .filter((effort) => efforts.includes(effort))
         .flatMap((effort) =>
           m.configs.map((config) => ({
@@ -356,9 +357,9 @@ function unitCost(lines: ResultLine[]) {
 
 /**
  * Runs `plan` with `concurrency` workers under `budget`, skipping `done` keys. When a
- * reservation is refused, no new unit starts; the ones in flight finish. A unit is settled as
- * soon as its requests end, and written once its `/generation` lookups are done, in the
- * background while the next units run.
+ * reservation is refused, no new unit starts; the ones in flight finish. A unit is settled and
+ * written as soon as its requests end; its `/generation` lookups finish in the background and
+ * are recorded apart (a unit interrupted before them keeps null providers).
  */
 export async function execute(
   plan: Unit[],
@@ -370,6 +371,7 @@ export async function execute(
     done = new Set<string>(),
     deps,
     write = (lines: ResultLine[]) => appendLines(runId, lines),
+    enrich = (lines: ResultLine[]) => appendProviders(runId, lines),
     log = console.log,
   }: {
     runId: string;
@@ -379,6 +381,8 @@ export async function execute(
     done?: Set<string>;
     deps: RunDeps;
     write?: (lines: ResultLine[]) => void;
+    /** Records the providers of lines already written, once `/generation` has answered. */
+    enrich?: (lines: ResultLine[]) => void;
     log?: (line: string) => void;
   },
 ) {
@@ -404,7 +408,9 @@ export async function execute(
       log(
         `[${done.size + completed}/${plan.length}] ${unit.key} · ${lines.map((l) => l.status).join(',')} · $${budget.spent.toFixed(4)}`,
       );
-      writes.push(lookups.then(() => write(lines)));
+      // Written now, so an interruption never loses a paid unit; providers follow.
+      write(lines);
+      writes.push(lookups.then(() => enrich(lines)));
     }
   };
   await Promise.all(Array.from({ length: concurrency }, worker));

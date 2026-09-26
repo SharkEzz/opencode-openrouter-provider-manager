@@ -42,14 +42,14 @@ export const REPETITIONS: Record<Workload, Record<ModelClass, number>> = {
   'big-context': { 'open-weight': 15, premium: 5 },
 };
 
-/** Efforts a model class skips on a workload: premium long costs too much at low and high. */
-export const SKIPPED_EFFORTS: Partial<Record<ModelClass, Partial<Record<Workload, Effort[]>>>> = {
-  premium: { long: ['low', 'high'] },
+/** Efforts a calibrated model skips: gpt-6-sol long costs too much at low and high. */
+export const SKIPPED_EFFORTS: Partial<Record<string, Partial<Record<Workload, Effort[]>>>> = {
+  'openai/gpt-6-sol': { long: ['low', 'high'] },
 };
 
-/** The efforts measured for a workload (and a model class), in `EFFORTS` order. */
-export function effortsOf(workload: Workload, modelClass?: ModelClass): Effort[] {
-  const skipped = (modelClass && SKIPPED_EFFORTS[modelClass]?.[workload]) ?? [];
+/** The efforts measured for a workload (and a model), in `EFFORTS` order. */
+export function effortsOf(workload: Workload, model?: string): Effort[] {
+  const skipped = (model && SKIPPED_EFFORTS[model]?.[workload]) ?? [];
   return EFFORTS.filter(
     (effort) => MAX_TOKENS[workload][effort] !== undefined && !skipped.includes(effort),
   );

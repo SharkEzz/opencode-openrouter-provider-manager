@@ -94,6 +94,13 @@ describe('dry-run', () => {
       n: 1,
     });
     expect(new Set(cells.map((c) => c.effort))).toEqual(new Set(['medium']));
+    // The skip is keyed to the calibrated model, not to its class.
+    const other = cellsOf([{ ...models[0]!, model: 'x/premium' }], {
+      workloads: ['long'],
+      efforts: ['low', 'high'],
+      n: 1,
+    });
+    expect(new Set(other.map((c) => c.effort))).toEqual(new Set(['low', 'high']));
   });
 
   it('refuses a model without endpoints', async () => {
@@ -196,19 +203,31 @@ describe('execute', () => {
     const { endpoints, plan } = await setup(['short']);
     const done = new Set(plan.slice(0, 4).map((u) => u.key));
     const written: ResultLine[][] = [];
+    const enriched: ResultLine[][] = [];
+    // /generation only answers after every unit has been sent (a timer runs after microtasks).
+    const d = deps();
+    const late = new Promise<void>((resolve) => setTimeout(resolve, 0));
+    d.generation.mockImplementation(async () => {
+      await late;
+      return { providerUsed: 'OpenAI', latencyMs: 700, generationTimeMs: 1400 };
+    });
     const result = await execute(plan, {
       runId: 'run-1',
       snapshot: endpoints,
       budget: new Budget(100),
       concurrency: 2,
       done,
-      deps: deps(),
-      write: (lines) => written.push(lines),
+      deps: d,
+      // Snapshot what is written: the lines are enriched in place afterwards.
+      write: (lines) => written.push(structuredClone(lines)),
+      enrich: (lines) => enriched.push(lines),
       log: () => undefined,
     });
     expect(result).toMatchObject({ completed: plan.length - 4, remaining: 0, refused: null });
-    // Written only once /generation has filled in the provider.
-    expect(written.flat().every((l) => l.providerUsed === 'OpenAI')).toBe(true);
+    // Written before /generation answers, then enriched once it has.
+    expect(written.flat().every((l) => l.providerUsed === null)).toBe(true);
+    expect(enriched.flat().every((l) => l.providerUsed === 'OpenAI')).toBe(true);
+    expect(enriched).toHaveLength(written.length);
     const keys = written.map((lines) => lines[0]!.key);
     expect(keys.some((key) => done.has(key))).toBe(false);
     expect(new Set(keys).size).toBe(plan.length - 4);
