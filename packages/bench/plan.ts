@@ -29,13 +29,15 @@ export type Unit = {
   /** Index among the measured units of the cell; the warm-up is -1. */
   iteration: number;
   warmup: boolean;
+  /** Big-context: requests of this series; the last one holds the remainder of `n`. */
+  seriesLength?: number;
 };
 
 export function cellKey(cell: Omit<Cell, 'n'>) {
   return [cell.model, cell.config.tag ?? 'auto', cell.workload, cell.effort].join('|');
 }
 
-/** Big-context runs whole series; the other workloads one unit per repetition. */
+/** Big-context runs series of up to `SERIES_LENGTH`; the other workloads one unit per repetition. */
 export function unitsOf(workload: Workload, n: number) {
   return workload === 'big-context' ? Math.ceil(n / SERIES_LENGTH) : n;
 }
@@ -59,7 +61,16 @@ export function buildPlan(cells: Cell[], seed: number): Unit[] {
         warmup: true,
       });
     for (let i = 0; i < unitsOf(cell.workload, cell.n); i++)
-      units.push({ ...base, effort: cell.effort, key: `${key}|${i}`, iteration: i, warmup: false });
+      units.push({
+        ...base,
+        effort: cell.effort,
+        key: `${key}|${i}`,
+        iteration: i,
+        warmup: false,
+        ...(cell.workload === 'big-context' && {
+          seriesLength: Math.min(SERIES_LENGTH, cell.n - i * SERIES_LENGTH),
+        }),
+      });
     return units;
   });
   const random = rng(seed);
@@ -106,17 +117,19 @@ const maxTokensOf = (unit: Pick<Unit, 'workload' | 'effort'>) => {
  * Expected USD of one unit, from the workload's expected tokens plus the reasoning expected at
  * its effort. Auto is priced at the mean of its endpoints.
  */
-export function estimate(
-  unit: Pick<Unit, 'config' | 'workload' | 'effort'>,
-  endpoints: Endpoint[],
-) {
+type Priced = Pick<Unit, 'config' | 'workload' | 'effort' | 'seriesLength'>;
+
+/** The requests of one unit: a short series only sends its own length. */
+const requestsOf = <T>(unit: Priced, perRequest: T[]) => perRequest.slice(0, unit.seriesLength);
+
+export function estimate(unit: Priced, endpoints: Endpoint[]) {
   const pool = candidates(unit, endpoints);
   if (pool.length === 0) return null;
   const maxTokens = maxTokensOf(unit);
   const output = (visible: number) =>
     Math.min(maxTokens, visible + EXPECTED_REASONING[unit.effort]);
   const cost = (p: Prices) =>
-    SPECS[unit.workload].expected.reduce(
+    requestsOf(unit, SPECS[unit.workload].expected).reduce(
       (sum, t) =>
         sum +
         (t.input - t.cachedInput) * p.input +
@@ -131,15 +144,16 @@ export function estimate(
  * Worst-case USD of one unit (SPEC §8): for each request, its input bound at the highest input
  * price plus `max_tokens` at the highest output price among the endpoints the config may use.
  */
-export function reserve(unit: Pick<Unit, 'config' | 'workload' | 'effort'>, endpoints: Endpoint[]) {
+export function reserve(unit: Priced, endpoints: Endpoint[]) {
   const pool = candidates(unit, endpoints);
   if (pool.length === 0) return null;
   const input = Math.max(...pool.map((p) => p.input));
   const output = Math.max(...pool.map((p) => p.output));
   const maxTokens = maxTokensOf(unit);
-  return SPECS[unit.workload]
-    .worstInput(maxTokens)
-    .reduce((sum, tokens) => sum + tokens * input + maxTokens * output, 0);
+  return requestsOf(unit, SPECS[unit.workload].worstInput(maxTokens)).reduce(
+    (sum, tokens) => sum + tokens * input + maxTokens * output,
+    0,
+  );
 }
 
 export type Reservation = { readonly usd: number };

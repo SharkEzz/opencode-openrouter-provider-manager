@@ -145,7 +145,7 @@ export function dryRun(plan: Unit[], snapshot: EndpointSnapshot[]): DryRunRow[] 
       rows.set(key, row);
     }
     row.units++;
-    row.requests += requestsOf(unit.workload);
+    row.requests += requestsOf(unit);
     row.estimateUsd += estimate(unit, endpoints) ?? Infinity;
   }
   // Plan order is shuffled; the table reads by model, workload, effort, then config.
@@ -164,8 +164,12 @@ export function dryRun(plan: Unit[], snapshot: EndpointSnapshot[]): DryRunRow[] 
 }
 
 /** Requests of one unit: at most, for agentic. */
-const requestsOf = (workload: Workload) =>
-  workload === 'big-context' ? SERIES_LENGTH : workload === 'agentic' ? MAX_AGENTIC_TURNS : 1;
+const requestsOf = (unit: Unit) =>
+  unit.workload === 'big-context'
+    ? (unit.seriesLength ?? SERIES_LENGTH)
+    : unit.workload === 'agentic'
+      ? MAX_AGENTIC_TURNS
+      : 1;
 
 export function formatDryRun(rows: DryRunRow[], maxUsd: number) {
   const usd = (value: number) => (Number.isFinite(value) ? `$${value.toFixed(4)}` : 'n/a');
@@ -274,7 +278,7 @@ export async function runUnit(unit: Unit, runId: string, deps: RunDeps): Promise
       break;
     case 'big-context': {
       const id = bigContext.nonce(runId, unit.model, unit.config.tag, unit.iteration);
-      for (let position = 0; position < SERIES_LENGTH; position++)
+      for (let position = 0; position < (unit.seriesLength ?? SERIES_LENGTH); position++)
         await request(bigContext.messages(id, position), { position });
       break;
     }
@@ -295,6 +299,22 @@ export async function runUnit(unit: Unit, runId: string, deps: RunDeps): Promise
 /** A streamed tool call may come without an id; its result still needs one to refer to. */
 const withId = (call: ToolCall, turn: number, index: number): ToolCall =>
   call.id ? call : { ...call, id: `call_${turn}_${index}` };
+
+/**
+ * What the units already written have consumed from the budget, for `--resume`: their real
+ * cost, or their reservation when a cost is unknown, as `Budget.settle` charged it.
+ */
+export function spentBy(plan: Unit[], lines: ResultLine[], snapshot: EndpointSnapshot[]) {
+  const units = new Map(plan.map((unit) => [unit.key, unit]));
+  let spent = 0;
+  for (const [key, unitLines] of Map.groupBy(lines, (line) => line.key)) {
+    const unit = units.get(key);
+    const reserved = unit ? reserve(unit, endpointsOf(snapshot, unit.model)) : null;
+    const fallback = unitLines.reduce((sum, line) => sum + (line.costUsd ?? 0), 0);
+    spent += unitCost(unitLines) ?? reserved ?? fallback;
+  }
+  return spent;
+}
 
 /** Real cost of a unit, or null when one of its requests has none. */
 function unitCost(lines: ResultLine[]) {
@@ -407,16 +427,17 @@ async function main() {
   });
   const maxUsd = positive(values['max-usd'], '--max-usd', false);
   let meta: RunMeta;
-  let done = new Set<string>();
-  let spent = 0;
+  let lines: ResultLine[] = [];
 
   if (values.resume) {
     if (values['dry-run']) throw new Error('--resume and --dry-run are exclusive');
     meta = readMeta(values.resume);
-    if (maxUsd !== undefined) meta.args.maxUsd = maxUsd;
-    const lines = readLines(meta.runId);
-    done = new Set(lines.map((line) => line.key));
-    spent = lines.reduce((sum, line) => sum + (line.costUsd ?? 0), 0);
+    // A raised cap is kept for later resumes and published by summarize.
+    if (maxUsd !== undefined && maxUsd !== meta.args.maxUsd) {
+      meta.args.maxUsd = maxUsd;
+      writeMeta(meta);
+    }
+    lines = readLines(meta.runId);
   } else {
     const ids = values.models?.split(',').map((id) => id.trim());
     const models = ids
@@ -470,13 +491,13 @@ async function main() {
   console.log(
     `\nrun ${meta.runId} · ${plan.length} units · cap $${meta.args.maxUsd} → ${RESULTS_DIR}`,
   );
-  const budget = new Budget(meta.args.maxUsd, spent);
+  const budget = new Budget(meta.args.maxUsd, spentBy(plan, lines, meta.endpoints));
   const result = await execute(plan, {
     runId: meta.runId,
     snapshot: meta.endpoints,
     budget,
     concurrency: meta.args.concurrency,
-    done,
+    done: new Set(lines.map((line) => line.key)),
     deps: {
       send: async (body) => send(body, { apiKey }),
       generation: async (id) => fetchGeneration(id, { apiKey }),

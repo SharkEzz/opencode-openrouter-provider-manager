@@ -34,6 +34,13 @@ describe('buildPlan', () => {
     expect(plan).toHaveLength(3 * 5 + 3 * 2);
   });
 
+  it('ends with a partial series instead of oversampling big-context', () => {
+    const plan = buildPlan([{ ...cells[1]!, n: 6 }], 1);
+    expect(plan.map((u) => u.seriesLength)).toEqual([5, 1]);
+    const [full, partial] = plan.map((u) => reserve(u, sol)!);
+    expect(partial).toBeCloseTo(full! / 5);
+  });
+
   it('interleaves the cells round by round, warm-ups first', () => {
     const plan = buildPlan(cells, 7);
     const firstRound = plan.slice(0, cells.length);

@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import solListing from '../../plugin/tests/fixtures/gpt-6-sol.endpoints.json' with { type: 'json' };
 import type { RequestMetrics, ToolCall } from '../client.ts';
 import { SERIES_LENGTH } from '../config.ts';
-import { Budget, buildPlan, type Unit } from '../plan.ts';
+import { Budget, buildPlan, reserve, type Unit } from '../plan.ts';
 import type { ResultLine } from '../results.ts';
 import {
   cellsOf,
@@ -13,6 +13,7 @@ import {
   formatDryRun,
   resolveModels,
   runUnit,
+  spentBy,
   type RunDeps,
 } from '../run.ts';
 
@@ -77,7 +78,8 @@ describe('dry-run', () => {
     const short = rows.find((r) => r.workload === 'short' && r.effort === 'low')!;
     expect(short).toMatchObject({ units: 3, requests: 3 });
     const series = rows.find((r) => r.workload === 'big-context')!;
-    expect(series).toMatchObject({ units: 1, requests: SERIES_LENGTH });
+    // n = 2: one series of two requests, not a full series.
+    expect(series).toMatchObject({ units: 1, requests: 2 });
     const { overBudget, text } = formatDryRun(rows, 0.001);
     expect(overBudget).toBe(true);
     expect(text).toContain('total:');
@@ -120,7 +122,7 @@ describe('runUnit', () => {
   });
 
   it('sends a big-context series on one prefix', async () => {
-    const { plan } = await setup(['big-context']);
+    const { plan } = await setup(['big-context'], SERIES_LENGTH + 2);
     const d = deps();
     const lines = await runUnit(unit(plan, 'big-context'), 'run-1', d);
     expect(lines.map((l) => l.position)).toEqual([0, 1, 2, 3, 4]);
@@ -159,6 +161,23 @@ describe('runUnit', () => {
     const d = deps([metrics({ status: 'http_429', costUsd: null })]);
     const lines = await runUnit(unit(plan, 'agentic'), 'run-1', d);
     expect(lines).toHaveLength(1);
+  });
+});
+
+describe('spentBy', () => {
+  it('charges the reservation of a written unit whose cost is unknown', async () => {
+    const { endpoints, plan } = await setup(['short']);
+    const [known, unknown] = plan;
+    const d = deps([metrics({ costUsd: 0.002 }), metrics({ costUsd: null })]);
+    const lines = [
+      ...(await runUnit(known!, 'run-1', d)),
+      ...(await runUnit(unknown!, 'run-1', d)),
+    ];
+    const reserved = reserve(
+      unknown!,
+      endpoints.filter((e) => e.model === MODEL),
+    )!;
+    expect(spentBy(plan, lines, endpoints)).toBeCloseTo(0.002 + reserved);
   });
 });
 
