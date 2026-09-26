@@ -4,5 +4,5 @@
     "types": ["node"],
     "tsBuildInfoFile": "./node_modules/.tsbuildinfo"
   },
-  "include": ["*.ts", "tests"]
+  "include": ["*.ts", "workloads", "tests"]
 }

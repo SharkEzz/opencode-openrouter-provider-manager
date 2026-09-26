@@ -10,8 +10,12 @@
     "./observed/*": "./observed/*"
   },
   "scripts": {
+    "bench": "node run.ts",
+    "bench:corpus": "node corpus.ts",
     "bench:fake": "node fake-summary.ts",
     "bench:observe": "node observe.ts",
+    "bench:report": "node report.ts",
+    "bench:summarize": "node summarize.ts",
     "test": "vitest run"
   },
   "dependencies": {
