@@ -46,7 +46,10 @@ import {
   type ResultLine,
   RESULTS_DIR,
   type RunMeta,
+  latestAttempts,
   unanswered,
+  unitAttempts,
+  unsent,
   writeMeta,
 } from './results.ts';
 import type { EndpointSnapshot, Observed } from './schema.ts';
@@ -331,14 +334,14 @@ const withId = (call: ToolCall, turn: number, index: number): ToolCall =>
   call.id ? call : { ...call, id: `call_${turn}_${index}` };
 
 /**
- * What the units already written have consumed from the budget, for `--resume`: their real
+ * What the attempts already written have consumed from the budget, for `--resume`: their real
  * cost, or their reservation when a cost is unknown, as `Budget.settle` charged it.
  */
 export function spentBy(plan: Unit[], lines: ResultLine[], snapshot: EndpointSnapshot[]) {
   const units = new Map(plan.map((unit) => [unit.key, unit]));
   let spent = 0;
-  for (const [key, unitLines] of Map.groupBy(lines, (line) => line.key)) {
-    const unit = units.get(key);
+  for (const unitLines of unitAttempts(lines)) {
+    const unit = units.get(unitLines[0]!.key);
     const reserved = unit ? reserve(unit, endpointsOf(snapshot, unit.model)) : null;
     const fallback = unitLines.reduce((sum, line) => sum + (line.costUsd ?? 0), 0);
     spent += unitCost(unitLines) ?? reserved ?? fallback;
@@ -347,11 +350,11 @@ export function spentBy(plan: Unit[], lines: ResultLine[], snapshot: EndpointSna
 }
 
 /**
- * Real cost of a line. Without usage it is free only when no provider generated anything: no
- * response at all, or an HTTP error before the stream (OpenRouter bills neither). Else unknown.
+ * Real cost of a line. Without usage it is free only when nothing can have been generated: a
+ * connection that failed, or an HTTP error before the stream (OpenRouter bills neither).
  */
 const lineCost = (line: ResultLine) =>
-  line.costUsd ?? (unanswered(line) || line.status.startsWith('http_') ? 0 : null);
+  line.costUsd ?? (unsent(line) || line.status.startsWith('http_') ? 0 : null);
 
 /** Real cost of a unit, or null when one of its requests has none. */
 function unitCost(lines: ResultLine[]) {
@@ -365,10 +368,11 @@ function unitCost(lines: ResultLine[]) {
 }
 
 /**
- * The units `--resume` skips: every unit written, except those with a request that got no
- * response, which measured nothing and are sent again.
+ * The units `--resume` skips: every unit written, except those whose last attempt has a request
+ * that got no response, which measured nothing and are sent again.
  */
 export function doneKeys(lines: ResultLine[]) {
+  lines = latestAttempts(lines);
   const retried = new Set(lines.filter(unanswered).map((line) => line.key));
   return new Set(lines.map((line) => line.key).filter((key) => !retried.has(key)));
 }
@@ -559,6 +563,7 @@ async function main() {
   const budget = new Budget(meta.args.maxUsd, spentBy(plan, lines, meta.endpoints));
   const done = doneKeys(lines);
   const retried = new Set(lines.map((line) => line.key)).size - done.size;
+  // A request without response keeps its reservation unless it failed to connect.
   if (retried > 0) console.log(`sending again ${retried} units that got no response`);
   const result = await execute(plan, {
     runId: meta.runId,

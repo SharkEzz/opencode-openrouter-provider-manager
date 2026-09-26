@@ -212,7 +212,7 @@ export async function send(
     }
   } catch (error) {
     if (signal.aborted) fail('timeout', `no response after ${timeoutMs}ms`);
-    else fail('stream_error', error instanceof Error ? error.message : String(error));
+    else fail('stream_error', errorMessage(error));
   }
 
   const tEnd = now();
@@ -223,6 +223,14 @@ export async function send(
       metrics.outputTps = (metrics.completionTokens * 1000) / (tEnd - tFirst);
   }
   return metrics;
+}
+
+/** The message of a thrown error, with the network code of its cause (`fetch failed: ENOTFOUND`). */
+function errorMessage(error: unknown) {
+  if (!(error instanceof Error)) return String(error);
+  const { cause } = error;
+  const code = cause instanceof Error && 'code' in cause ? cause.code : undefined;
+  return typeof code === 'string' ? `${error.message}: ${code}` : error.message;
 }
 
 const Generation = z.object({

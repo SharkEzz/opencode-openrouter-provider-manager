@@ -198,12 +198,12 @@ describe('spentBy', () => {
     expect(spentBy(plan, lines, endpoints)).toBeCloseTo(0.002 + reserved);
   });
 
-  it('charges nothing for a request without response or rejected over HTTP', async () => {
+  it('charges nothing for a request that failed to connect or was rejected over HTTP', async () => {
     const { endpoints, plan } = await setup(['short']);
     const d = deps([
       metrics({
         status: 'stream_error',
-        error: { code: null, message: 'fetch failed' },
+        error: { code: null, message: 'fetch failed: ENOTFOUND' },
         costUsd: null,
       }),
       metrics({ status: 'http_429', error: { code: 429, message: 'rate limited' }, costUsd: null }),
@@ -213,6 +213,28 @@ describe('spentBy', () => {
       ...(await runUnit(plan[1]!, 'run-1', d)),
     ];
     expect(spentBy(plan, lines, endpoints)).toBe(0);
+  });
+
+  it('keeps the reservation when a request may have been sent, and counts every attempt', async () => {
+    const { endpoints, plan } = await setup(['short']);
+    const target = plan[0]!;
+    const d = deps([
+      metrics({
+        status: 'stream_error',
+        error: { code: null, message: 'fetch failed' },
+        costUsd: null,
+      }),
+      metrics({ costUsd: 0.002 }),
+    ]);
+    const first = await runUnit(target, 'run-1', d);
+    const reserved = reserve(
+      target,
+      endpoints.filter((e) => e.model === MODEL),
+    )!;
+    expect(spentBy(plan, first, endpoints)).toBeCloseTo(reserved);
+    // Sent again on resume: the earlier attempt still counts.
+    const lines = [...first, ...(await runUnit(target, 'run-1', d))];
+    expect(spentBy(plan, lines, endpoints)).toBeCloseTo(reserved + 0.002);
   });
 });
 
@@ -229,6 +251,9 @@ describe('doneKeys', () => {
     const lines = [...(await runUnit(agentic, 'run-1', d)), ...(await runUnit(short, 'run-1', d))];
     // A stream cut after tokens came is a measured failure; only the silent unit is sent again.
     expect([...doneKeys(lines)]).toEqual([short.key]);
+    // Once sent again with success, it is done.
+    lines.push(...(await runUnit(agentic, 'run-1', d)));
+    expect(doneKeys(lines)).toEqual(new Set([short.key, agentic.key]));
   });
 });
 
@@ -293,7 +318,7 @@ describe('execute', () => {
     d.send.mockResolvedValue(
       metrics({
         status: 'stream_error',
-        error: { code: null, message: 'fetch failed' },
+        error: { code: null, message: 'fetch failed: ECONNREFUSED' },
         costUsd: null,
       }),
     );
