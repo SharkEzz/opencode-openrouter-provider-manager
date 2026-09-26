@@ -244,6 +244,7 @@ describe('execute', () => {
       concurrency: 1,
       deps: d,
       write: () => undefined,
+      enrich: () => undefined,
       log: () => undefined,
     });
     expect(result.refused).not.toBeNull();
