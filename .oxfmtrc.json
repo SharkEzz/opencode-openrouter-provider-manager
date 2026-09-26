@@ -9,6 +9,7 @@
     "dist",
     "plans",
     "packages/design-system",
+    "packages/bench/fixtures",
     "packages/bench/observed",
     "packages/bench/results"
   ],

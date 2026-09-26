@@ -1,0 +1,3511 @@
+// file: packages/plugin/index.ts
+import { Plugin } from '@opencode/plugin';
+import { setupPlugin } from './src/setup.ts';
+
+export default Plugin.define({ id: 'openrouter-provider-manager', setup: setupPlugin });
+
+// file: packages/plugin/rpc.ts
+import { Rpc } from '@opencode/plugin';
+import { z } from 'zod';
+
+export const Tier = z.enum(['flex', 'default', 'priority']);
+export type Tier = z.infer<typeof Tier>;
+
+export const Endpoint = z.object({
+  /** Provider slug accepted by `provider.only`, e.g. "openai/flex". */
+  tag: z.string(),
+  provider: z.string(),
+  tier: Tier,
+  /** USD per million tokens; null when OpenRouter does not publish the price. */
+  input: z.number().nullable(),
+  output: z.number().nullable(),
+  /** USD per million prompt-cache read tokens; null when the endpoint does not publish it. */
+  cached: z.number().nullable(),
+  context: z.number().nullable(),
+  quantization: z.string().nullable(),
+  /** 0 is healthy; any other value is a degraded endpoint. */
+  status: z.number(),
+  uptime: z.number().nullable(),
+  reasoning: z.boolean(),
+});
+export type Endpoint = z.infer<typeof Endpoint>;
+
+/** What is persisted per model: enough to route and to render the footer without refetching. */
+export const Choice = Endpoint.pick({
+  tag: true,
+  provider: true,
+  tier: true,
+  input: true,
+  output: true,
+});
+export type Choice = z.infer<typeof Choice>;
+
+const model = z.string().describe('OpenRouter model id, e.g. openai/gpt-6-sol');
+
+export const OpenRouterProviders = Rpc.define({
+  id: 'openrouter-provider-manager',
+  methods: {
+    listEndpoints: {
+      input: z.object({ model }),
+      output: z.object({ endpoints: z.array(Endpoint) }),
+    },
+    getChoice: {
+      input: z.object({ model }),
+      output: z.object({ choice: Choice.nullable() }),
+    },
+    setChoice: {
+      input: z.object({ model, choice: Choice.nullable() }),
+      output: z.object({ choice: Choice.nullable() }),
+    },
+    debug: {
+      input: z.object({ enabled: z.boolean().optional() }),
+      output: z.object({ enabled: z.boolean(), log: z.string() }),
+    },
+  },
+  events: {
+    choice: { schema: z.object({ model, choice: Choice.nullable() }) },
+  },
+});
+
+export default OpenRouterProviders;
+
+// file: packages/plugin/src/debug.ts
+import { appendFile, mkdir } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import path from 'node:path';
+
+export const DEBUG_LOG = path.join(
+  process.env.XDG_DATA_HOME ?? path.join(homedir(), '.local', 'share'),
+  'opencode',
+  'log',
+  'openrouter-provider-manager.log',
+);
+
+/** One line per outgoing OpenRouter request: the fields that decide effort and routing. */
+export async function logRequest(entry: {
+  kind: string;
+  model: string;
+  sessionID: string;
+  body: Record<string, unknown>;
+}) {
+  const fields = Object.entries({
+    model: entry.model,
+    kind: entry.kind,
+    session: entry.sessionID,
+    // Chat Completions uses `reasoning`; keep the flat variants in case a driver sends them.
+    reasoning: entry.body.reasoning,
+    reasoning_effort: entry.body.reasoning_effort,
+    service_tier: entry.body.service_tier,
+    provider: entry.body.provider,
+  })
+    .filter(([, value]) => value !== undefined)
+    .map(([key, value]) => `${key}=${typeof value === 'string' ? value : JSON.stringify(value)}`);
+  await mkdir(path.dirname(DEBUG_LOG), { recursive: true });
+  await appendFile(DEBUG_LOG, `${new Date().toISOString()} ${fields.join('  ')}\n`);
+}
+
+// file: packages/plugin/src/format.ts
+import type { Choice, Endpoint } from '../rpc.ts';
+
+export function price(value: number | null) {
+  if (value === null) return '?';
+  return `$${value < 1 ? value.toFixed(3).replace(/0$/, '') : value.toFixed(2)}`;
+}
+
+export function tokens(value: number | null) {
+  if (value === null) return '?';
+  if (value >= 1_000_000) return `${+(value / 1_000_000).toFixed(1)}M`;
+  return `${Math.round(value / 1000)}k`;
+}
+
+export function degraded(endpoint: Endpoint) {
+  return endpoint.status !== 0 || (endpoint.uptime !== null && endpoint.uptime < 95);
+}
+
+export function summary(choice: Choice) {
+  return `${choice.tag} · ${price(choice.input)}/${price(choice.output)}`;
+}
+
+// file: packages/plugin/src/model.ts
+import type { ModelRef } from './tui-state.ts';
+
+/**
+ * The model the TUI is showing. A pick made in the model picker only applies to the screen
+ * it was made on: reopening a session restores that session's model, whatever was picked
+ * elsewhere since. On the home screen there is no session, so the last pick applies.
+ */
+export function resolveModel(input: {
+  readonly sessionID: string | undefined;
+  readonly sessionModel: ModelRef | undefined;
+  /** Pick made on this screen (session or home), if any. */
+  readonly pick: ModelRef | undefined;
+  /** Last pick persisted by the TUI, from any screen. */
+  readonly lastPicked: () => ModelRef | undefined;
+}): ModelRef | undefined {
+  if (input.pick) return input.pick;
+  return input.sessionID ? input.sessionModel : input.lastPicked();
+}
+
+// file: packages/plugin/src/openrouter.ts
+import type { Endpoint, Tier } from '../rpc.ts';
+import { z } from 'zod';
+
+const API = 'https://openrouter.ai/api/v1';
+const TTL = 10 * 60 * 1000;
+
+const RawEndpoint = z.object({
+  provider_name: z.string().optional(),
+  tag: z.string().optional(),
+  context_length: z.number().nullable().optional(),
+  quantization: z.string().nullable().optional(),
+  status: z.number().optional(),
+  uptime_last_30m: z.number().nullable().optional(),
+  supported_parameters: z.array(z.string()).optional(),
+  pricing: z
+    .object({
+      prompt: z.string().optional(),
+      completion: z.string().optional(),
+      input_cache_read: z.string().optional(),
+    })
+    .optional(),
+});
+
+const EndpointResponse = z.object({
+  data: z.object({ endpoints: z.array(RawEndpoint).optional() }).optional(),
+});
+
+const ModelsResponse = z.object({
+  data: z
+    .array(
+      z.object({
+        id: z.string(),
+        alias_target: z.object({ slug: z.string().optional() }).optional(),
+      }),
+    )
+    .optional(),
+});
+
+type RawEndpoint = z.infer<typeof RawEndpoint>;
+
+const cache = new Map<string, { at: number; endpoints: Endpoint[] }>();
+
+/** Test hook: forget every cached listing. */
+export function clearEndpointCache(): void {
+  cache.clear();
+}
+
+export function perMillion(value: string | undefined): number | null {
+  if (value === undefined) return null;
+  const n = Number(value);
+  // OpenRouter uses -1 for "variable pricing" (e.g. the auto router).
+  // Round away float noise from the per-token string (0.00000005 * 1e6 = 0.049999…).
+  return Number.isFinite(n) && n >= 0 ? Math.round(n * 1e12) / 1e6 : null;
+}
+
+export function tierOf(tag: string): Tier {
+  const suffix = tag.split('/')[1];
+  if (suffix === 'flex') return 'flex';
+  if (suffix === 'fast' || suffix === 'priority') return 'priority';
+  return 'default';
+}
+
+export function normalize(raw: RawEndpoint): Endpoint | undefined {
+  if (!raw.tag) return undefined;
+  return {
+    tag: raw.tag,
+    provider: raw.provider_name ?? raw.tag,
+    tier: tierOf(raw.tag),
+    input: perMillion(raw.pricing?.prompt),
+    output: perMillion(raw.pricing?.completion),
+    cached: perMillion(raw.pricing?.input_cache_read),
+    context: raw.context_length ?? null,
+    quantization: raw.quantization && raw.quantization !== 'unknown' ? raw.quantization : null,
+    status: raw.status ?? 0,
+    uptime: raw.uptime_last_30m ?? null,
+    reasoning: raw.supported_parameters?.includes('reasoning') ?? false,
+  };
+}
+
+async function get<T>(
+  url: string,
+  apiKey: string | undefined,
+  schema: z.ZodType<T>,
+  signal?: AbortSignal,
+): Promise<T> {
+  const response = await fetch(url, {
+    headers: apiKey ? { authorization: `Bearer ${apiKey}` } : {},
+    ...(signal ? { signal } : undefined),
+  });
+  if (!response.ok) {
+    const detail = await response.text().catch(() => '');
+    throw new Error(
+      `OpenRouter ${response.status} (${url.slice(API.length)})${detail ? `: ${detail.slice(0, 200)}` : ''}`,
+    );
+  }
+  const json: unknown = await response.json();
+  return schema.parse(json);
+}
+
+/** Aliases like `~deepseek/deepseek-flash-latest` have no endpoints of their own. */
+async function aliasTarget(model: string, apiKey: string | undefined, signal?: AbortSignal) {
+  const json = await get(`${API}/models`, apiKey, ModelsResponse, signal);
+  return json.data?.find((m) => m.id === model)?.alias_target?.slug;
+}
+
+export async function fetchEndpoints(
+  model: string,
+  apiKey: string | undefined,
+  signal?: AbortSignal,
+) {
+  const hit = cache.get(model);
+  if (hit && Date.now() - hit.at < TTL) return hit.endpoints;
+
+  let raw =
+    (await get(`${API}/models/${model}/endpoints`, apiKey, EndpointResponse, signal)).data
+      ?.endpoints ?? [];
+  if (raw.length === 0) {
+    const target = await aliasTarget(model, apiKey, signal);
+    if (target)
+      raw =
+        (await get(`${API}/models/${target}/endpoints`, apiKey, EndpointResponse, signal)).data
+          ?.endpoints ?? [];
+  }
+  const endpoints = raw
+    .map(normalize)
+    .filter((e): e is Endpoint => e !== undefined)
+    .sort((a, b) => (a.input ?? Infinity) - (b.input ?? Infinity))
+    // A tag can be listed twice; `provider.only` can't tell them apart, so keep the cheapest.
+    .filter((endpoint, index, all) => all.findIndex((e) => e.tag === endpoint.tag) === index);
+
+  cache.set(model, { at: Date.now(), endpoints });
+  return endpoints;
+}
+
+// file: packages/plugin/src/pin.ts
+/**
+ * Pins an OpenRouter request body to one endpoint. Only `provider` changes, so the
+ * variant's `reasoning` settings and every other field pass through untouched.
+ */
+export function pinProvider(body: Record<string, unknown>, tag: string): Record<string, unknown> {
+  // `order` would let OpenRouter try other endpoints first; `only` is the whole point.
+  const value = body.provider;
+  const source = isRecord(value) ? value : {};
+  const { order: _order, ...provider } = source;
+  return { ...body, provider: { ...provider, only: [tag], allow_fallbacks: false } };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
+// file: packages/plugin/src/setup.ts
+import { Plugin } from '@opencode/plugin';
+import type { SessionHttpRequest } from '@opencode/plugin/promise/session';
+import { Choice, OpenRouterProviders } from '../rpc.ts';
+import { DEBUG_LOG, logRequest } from './debug.ts';
+import { fetchEndpoints } from './openrouter.ts';
+import { pinProvider } from './pin.ts';
+import { isRecord } from './utils.ts';
+
+const PROVIDER = 'openrouter';
+
+type RuntimeContext = {
+  storage: Pick<Plugin.Context['storage'], 'get' | 'set' | 'remove'>;
+  rpc: Pick<Plugin.Context['rpc'], 'register'>;
+  session: {
+    hook: (
+      name: 'http.request',
+      callback: (event: SessionHttpRequest) => void | Promise<void>,
+      options?: { providerID?: string },
+    ) => Promise<{ dispose: () => Promise<void> }>;
+  };
+  integration: {
+    connection: Pick<Plugin.Context['integration']['connection'], 'active' | 'resolve'>;
+  };
+};
+
+export async function setupPlugin(ctx: RuntimeContext) {
+  const storageKey = (model: string) => `choice/${encodeURIComponent(model)}`;
+
+  // Storage is shared by every location's instance of this plugin, so always read it:
+  // an in-memory cache here goes stale when another location changes the choice.
+  async function getChoice(model: string) {
+    const parsed = Choice.safeParse(await ctx.storage.get(storageKey(model)));
+    return parsed.success ? parsed.data : null;
+  }
+
+  async function debugEnabled() {
+    return (await ctx.storage.get('debug')) === true;
+  }
+
+  async function apiKey() {
+    const connection = await ctx.integration.connection.active(PROVIDER).catch(() => undefined);
+    const credential =
+      connection && (await ctx.integration.connection.resolve(connection).catch(() => undefined));
+    if (credential?.type === 'key') return credential.key;
+    if (credential?.type === 'oauth') return credential.access;
+    return process.env.OPENROUTER_API_KEY;
+  }
+
+  const rpc = await ctx.rpc.register(OpenRouterProviders, {
+    listEndpoints: async ({ model }, { signal }) => ({
+      endpoints: await fetchEndpoints(model, await apiKey(), signal),
+    }),
+    getChoice: async ({ model }) => ({ choice: await getChoice(model) }),
+    setChoice: async ({ model, choice }) => {
+      if (choice) await ctx.storage.set(storageKey(model), choice);
+      else await ctx.storage.remove(storageKey(model));
+      await rpc.events.emit('choice', { model, choice });
+      return { choice };
+    },
+    debug: async ({ enabled }) => {
+      if (enabled !== undefined) await ctx.storage.set('debug', enabled);
+      return { enabled: await debugEnabled(), log: DEBUG_LOG };
+    },
+  });
+
+  // Pin the chosen endpoint on every OpenRouter call. Only `provider` is touched, so the
+  // variant's `reasoning` settings chosen in the native picker pass through unchanged.
+  const hook = await ctx.session.hook(
+    'http.request',
+    async (event) => {
+      const [choice, debug] = await Promise.all([getChoice(event.model.id), debugEnabled()]);
+      const request = event.request;
+      if ((!choice && !debug) || request.method !== 'POST') return;
+      if (!request.headers.get('content-type')?.includes('application/json')) return;
+
+      let body: Record<string, unknown>;
+      try {
+        const parsed: unknown = await request.clone().json();
+        if (!isRecord(parsed)) return;
+        body = parsed;
+      } catch {
+        return;
+      }
+      const sent = choice ? pinProvider(body, choice.tag) : body;
+      if (choice) {
+        const headers = new Headers(request.headers);
+        headers.delete('content-length');
+        event.request = new Request(request, { headers, body: JSON.stringify(sent) });
+      }
+      // Logged after the rewrite: this is exactly what leaves for OpenRouter.
+      if (debug) {
+        await logRequest({
+          kind: event.kind,
+          model: event.model.id,
+          sessionID: event.sessionID,
+          body: sent,
+        }).catch(() => {});
+      }
+    },
+    { providerID: PROVIDER },
+  );
+
+  return async () => {
+    await hook.dispose();
+    await rpc.dispose();
+  };
+}
+
+// file: packages/plugin/src/tui-state.ts
+import { readFileSync, statSync } from 'node:fs';
+import { homedir } from 'node:os';
+import path from 'node:path';
+import { z } from 'zod';
+
+export type ModelRef = { providerID: string; id: string; variant?: string | undefined };
+
+// The TUI's own model picker persists its selection here. This is internal, undocumented
+// state, read only because plugins cannot see the live selection yet
+// (anomalyco/opencode#50315, PR #50745). Drop this once slot inputs expose the model.
+export const MODEL_STATE_FILE = path.join(
+  process.env.XDG_STATE_HOME ?? path.join(homedir(), '.local', 'state'),
+  'opencode',
+  'model.json',
+);
+
+const ModelState = z.object({
+  recent: z.array(z.object({ providerID: z.string(), modelID: z.string() })).optional(),
+  variant: z.record(z.string(), z.string()).optional(),
+});
+
+/** Last model picked in the TUI, with its variant, and when that selection was written. */
+export function pickedModel(): { model: ModelRef; at: number } | undefined {
+  try {
+    const at = statSync(MODEL_STATE_FILE).mtimeMs;
+    const parsed: unknown = JSON.parse(readFileSync(MODEL_STATE_FILE, 'utf8'));
+    const result = ModelState.safeParse(parsed);
+    if (!result.success) return undefined;
+    const state = result.data;
+    const last = state.recent?.[0];
+    if (!last) return undefined;
+    const variant = state.variant?.[`${last.providerID}/${last.modelID}`];
+    return {
+      model: {
+        providerID: last.providerID,
+        id: last.modelID,
+        variant: variant && variant !== 'default' ? variant : undefined,
+      },
+      at,
+    };
+  } catch {
+    return undefined;
+  }
+}
+
+// file: packages/plugin/src/utils.ts
+export function isRecord<T = unknown>(value: unknown): value is Record<string, T> {
+  return typeof value === 'object' && value != undefined && !Array.isArray(value);
+}
+
+// file: packages/plugin/tests/fixtures/alias.endpoints.json
+{ "data": { "id": "~deepseek/deepseek-flash-latest", "endpoints": [] } }
+
+// file: packages/plugin/tests/fixtures/deepseek.endpoints.json
+{
+  "data": {
+    "id": "deepseek/deepseek-v4.1-flash",
+    "endpoints": [
+      {
+        "provider_name": "DeepInfra",
+        "tag": "deepinfra/fp8",
+        "context_length": 1048576,
+        "quantization": "fp8",
+        "status": 0,
+        "uptime_last_30m": 99.9,
+        "supported_parameters": ["reasoning"],
+        "pricing": { "prompt": "0.00000005", "completion": "0.0000002" }
+      },
+      {
+        "provider_name": "DeepSeek",
+        "tag": "deepseek",
+        "context_length": 1048576,
+        "status": 0,
+        "uptime_last_30m": 100,
+        "supported_parameters": ["reasoning"],
+        "pricing": { "prompt": "0.00000004", "completion": "0.000001" }
+      }
+    ]
+  }
+}
+
+// file: packages/plugin/tests/fixtures/gpt-6-sol.endpoints.json
+{
+  "data": {
+    "id": "openai/gpt-6-sol",
+    "endpoints": [
+      {
+        "provider_name": "OpenAI",
+        "tag": "openai/fast",
+        "context_length": 1100000,
+        "quantization": "unknown",
+        "status": 0,
+        "uptime_last_30m": 100,
+        "supported_parameters": ["reasoning", "tools"],
+        "pricing": {
+          "prompt": "0.000004",
+          "completion": "0.00002",
+          "input_cache_read": "0.0000004"
+        }
+      },
+      {
+        "provider_name": "OpenAI",
+        "tag": "openai",
+        "context_length": 1100000,
+        "quantization": null,
+        "status": 0,
+        "uptime_last_30m": 100,
+        "supported_parameters": ["reasoning", "tools"],
+        "pricing": { "prompt": "0.000002", "completion": "0.00001" }
+      },
+      {
+        "provider_name": "Azure",
+        "tag": "azure",
+        "context_length": 1100000,
+        "status": 0,
+        "uptime_last_30m": 88.5,
+        "supported_parameters": ["tools"],
+        "pricing": { "prompt": "0.000002", "completion": "0.00001" }
+      },
+      {
+        "provider_name": "Azure",
+        "tag": "azure/us",
+        "context_length": 1100000,
+        "status": 0,
+        "uptime_last_30m": 100,
+        "supported_parameters": ["reasoning"],
+        "pricing": { "prompt": "0.0000022", "completion": "0.000011" }
+      },
+      {
+        "provider_name": "OpenAI",
+        "tag": "openai/flex",
+        "context_length": 1100000,
+        "status": 0,
+        "uptime_last_30m": null,
+        "supported_parameters": ["reasoning"],
+        "pricing": {
+          "prompt": "0.000001",
+          "completion": "0.000005",
+          "input_cache_read": "0.0000001"
+        }
+      },
+      {
+        "provider_name": "Azure",
+        "tag": "azure/us",
+        "context_length": 1100000,
+        "status": 0,
+        "uptime_last_30m": 100,
+        "supported_parameters": ["reasoning"],
+        "pricing": { "prompt": "0.0000025", "completion": "0.000012" }
+      },
+      {
+        "provider_name": "Router",
+        "tag": "router",
+        "context_length": null,
+        "status": -2,
+        "pricing": { "prompt": "-1", "completion": "-1" }
+      },
+      {
+        "provider_name": "Tagless",
+        "context_length": 1000,
+        "pricing": { "prompt": "0.000001", "completion": "0.000001" }
+      }
+    ]
+  }
+}
+
+// file: packages/plugin/tests/fixtures/models.json
+{
+  "data": [
+    { "id": "openai/gpt-6-sol" },
+    {
+      "id": "~deepseek/deepseek-flash-latest",
+      "alias_target": {
+        "name": "DeepSeek: DeepSeek V4.1 Flash",
+        "slug": "deepseek/deepseek-v4.1-flash"
+      }
+    }
+  ]
+}
+
+// file: packages/plugin/tests/format.test.ts
+import { describe, expect, it } from 'vitest';
+import type { Endpoint } from '../rpc.ts';
+import { degraded, price, summary, tokens } from '../src/format.ts';
+
+const endpoint = (overrides: Partial<Endpoint> = {}): Endpoint => ({
+  tag: 'openai',
+  provider: 'OpenAI',
+  tier: 'default',
+  input: 2,
+  output: 10,
+  cached: null,
+  context: 1_100_000,
+  quantization: null,
+  status: 0,
+  uptime: 100,
+  reasoning: true,
+  ...overrides,
+});
+
+describe('price', () => {
+  it('formats dollars per million with two decimals from $1', () => {
+    expect(price(2)).toBe('$2.00');
+    expect(price(10.75)).toBe('$10.75');
+  });
+  it('keeps three decimals below $1, without a trailing zero', () => {
+    expect(price(0.05)).toBe('$0.05');
+    expect(price(0.046)).toBe('$0.046');
+    expect(price(0.1)).toBe('$0.10');
+  });
+  it('shows ? when OpenRouter publishes no price', () => {
+    expect(price(null)).toBe('?');
+  });
+});
+
+describe('tokens', () => {
+  it('uses k below a million and M above', () => {
+    expect(tokens(8192)).toBe('8k');
+    expect(tokens(524_288)).toBe('524k');
+    expect(tokens(1_100_000)).toBe('1.1M');
+    expect(tokens(1_000_000)).toBe('1M');
+  });
+  it('shows ? for an unknown context', () => {
+    expect(tokens(null)).toBe('?');
+  });
+});
+
+describe('degraded', () => {
+  it('is false for a healthy endpoint', () => {
+    expect(degraded(endpoint())).toBe(false);
+  });
+  it('flags a non-zero status', () => {
+    expect(degraded(endpoint({ status: -2 }))).toBe(true);
+  });
+  it('flags uptime under 95% but not unknown uptime', () => {
+    expect(degraded(endpoint({ uptime: 94.9 }))).toBe(true);
+    expect(degraded(endpoint({ uptime: 95 }))).toBe(false);
+    expect(degraded(endpoint({ uptime: null }))).toBe(false);
+  });
+});
+
+describe('summary', () => {
+  it('joins tag and prices', () => {
+    expect(
+      summary({ tag: 'openai/flex', provider: 'OpenAI', tier: 'flex', input: 1, output: 5 }),
+    ).toBe('openai/flex · $1.00/$5.00');
+  });
+});
+
+// file: packages/plugin/tests/model.test.ts
+import { describe, expect, it, vi } from 'vitest';
+import { resolveModel } from '../src/model.ts';
+
+const sol = { providerID: 'openrouter', id: 'openai/gpt-6-sol', variant: 'low' };
+const luna = { providerID: 'openrouter', id: 'openai/gpt-6-luna', variant: 'high' };
+
+describe('resolveModel', () => {
+  it("uses the session's model when nothing was picked on this screen", () => {
+    const lastPicked = vi.fn<() => typeof luna>(() => luna);
+    expect(
+      resolveModel({ sessionID: 'ses_1', sessionModel: sol, pick: undefined, lastPicked }),
+    ).toBe(sol);
+    // Reopening a session must not follow a pick made elsewhere.
+    expect(lastPicked).not.toHaveBeenCalled();
+  });
+
+  it("prefers a pick made on this screen over the session's model", () => {
+    expect(
+      resolveModel({
+        sessionID: 'ses_1',
+        sessionModel: sol,
+        pick: luna,
+        lastPicked: () => undefined,
+      }),
+    ).toBe(luna);
+  });
+
+  it('falls back to the last pick on the home screen', () => {
+    expect(
+      resolveModel({
+        sessionID: undefined,
+        sessionModel: undefined,
+        pick: undefined,
+        lastPicked: () => luna,
+      }),
+    ).toBe(luna);
+  });
+
+  it("prefers the home screen's own pick", () => {
+    expect(
+      resolveModel({
+        sessionID: undefined,
+        sessionModel: undefined,
+        pick: sol,
+        lastPicked: () => luna,
+      }),
+    ).toBe(sol);
+  });
+
+  it('returns nothing when no model is known', () => {
+    expect(
+      resolveModel({
+        sessionID: 'ses_1',
+        sessionModel: undefined,
+        pick: undefined,
+        lastPicked: () => luna,
+      }),
+    ).toBeUndefined();
+  });
+});
+
+// file: packages/plugin/tests/openrouter.test.ts
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import alias from './fixtures/alias.endpoints.json' with { type: 'json' };
+import deepseek from './fixtures/deepseek.endpoints.json' with { type: 'json' };
+import sol from './fixtures/gpt-6-sol.endpoints.json' with { type: 'json' };
+import models from './fixtures/models.json' with { type: 'json' };
+import {
+  clearEndpointCache,
+  fetchEndpoints,
+  normalize,
+  perMillion,
+  tierOf,
+} from '../src/openrouter.ts';
+
+const API = 'https://openrouter.ai/api/v1';
+
+/** Routes fetch calls to fixtures; unknown URLs answer 404. */
+function mockFetch(routes: Record<string, unknown>) {
+  const fetch = vi.fn<(url: string | URL, _init?: RequestInit) => Promise<Response>>(
+    async (url: string | URL, _init?: RequestInit) => {
+      const body = routes[String(url)];
+      return body === undefined
+        ? new Response('model not found', { status: 404 })
+        : new Response(JSON.stringify(body), { headers: { 'content-type': 'application/json' } });
+    },
+  );
+  vi.stubGlobal('fetch', fetch);
+  return fetch;
+}
+
+beforeEach(() => clearEndpointCache());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.useRealTimers();
+});
+
+describe('perMillion', () => {
+  it('converts USD per token to USD per million without float noise', () => {
+    expect(perMillion('0.00000005')).toBe(0.05);
+    expect(perMillion('0.0000022')).toBe(2.2);
+    expect(perMillion('0')).toBe(0);
+  });
+  it('treats variable (-1), missing and invalid prices as unknown', () => {
+    expect(perMillion('-1')).toBeNull();
+    expect(perMillion(undefined)).toBeNull();
+    expect(perMillion('n/a')).toBeNull();
+  });
+});
+
+describe('tierOf', () => {
+  it('reads the tier from the tag suffix', () => {
+    expect(tierOf('openai/flex')).toBe('flex');
+    expect(tierOf('openai/fast')).toBe('priority');
+    expect(tierOf('anthropic/priority')).toBe('priority');
+    expect(tierOf('azure/us')).toBe('default');
+    expect(tierOf('openai')).toBe('default');
+  });
+});
+
+describe('normalize', () => {
+  it('maps the raw endpoint', () => {
+    expect(normalize(sol.data.endpoints[0]!)).toEqual({
+      tag: 'openai/fast',
+      provider: 'OpenAI',
+      tier: 'priority',
+      input: 4,
+      output: 20,
+      cached: 0.4,
+      context: 1_100_000,
+      quantization: null,
+      status: 0,
+      uptime: 100,
+      reasoning: true,
+    });
+  });
+  it('leaves the cached price unknown when the endpoint does not publish it', () => {
+    expect(normalize(sol.data.endpoints[2]!)?.cached).toBeNull();
+  });
+  it('detects endpoints without reasoning support', () => {
+    expect(normalize(sol.data.endpoints[2]!)?.reasoning).toBe(false);
+  });
+  it('skips endpoints without a tag, which provider.only cannot target', () => {
+    expect(normalize(sol.data.endpoints[7]!)).toBeUndefined();
+  });
+});
+
+describe('fetchEndpoints', () => {
+  it('sorts by input price with unknown prices last, and drops duplicate tags keeping the cheapest', async () => {
+    mockFetch({ [`${API}/models/openai/gpt-6-sol/endpoints`]: sol });
+    const endpoints = await fetchEndpoints('openai/gpt-6-sol', undefined);
+    expect(endpoints.map((e) => e.tag)).toEqual([
+      'openai/flex',
+      'openai',
+      'azure',
+      'azure/us',
+      'openai/fast',
+      'router',
+    ]);
+    expect(endpoints.find((e) => e.tag === 'azure/us')?.input).toBe(2.2);
+  });
+
+  it('sends the API key only when there is one', async () => {
+    const fetch = mockFetch({ [`${API}/models/openai/gpt-6-sol/endpoints`]: sol });
+    await fetchEndpoints('openai/gpt-6-sol', 'sk-or-test');
+    expect(fetch.mock.calls[0]![1]).toMatchObject({
+      headers: { authorization: 'Bearer sk-or-test' },
+    });
+
+    clearEndpointCache();
+    await fetchEndpoints('openai/gpt-6-sol', undefined);
+    expect(fetch.mock.calls[1]![1]).toMatchObject({ headers: {} });
+  });
+
+  it('falls back to the alias target when an alias has no endpoints', async () => {
+    mockFetch({
+      [`${API}/models/~deepseek/deepseek-flash-latest/endpoints`]: alias,
+      [`${API}/models`]: models,
+      [`${API}/models/deepseek/deepseek-v4.1-flash/endpoints`]: deepseek,
+    });
+    const endpoints = await fetchEndpoints('~deepseek/deepseek-flash-latest', undefined);
+    expect(endpoints.map((e) => e.tag)).toEqual(['deepseek', 'deepinfra/fp8']);
+  });
+
+  it('returns an empty list for a model without endpoints that is not an alias', async () => {
+    mockFetch({
+      [`${API}/models/acme/empty/endpoints`]: { data: { endpoints: [] } },
+      [`${API}/models`]: models,
+    });
+    expect(await fetchEndpoints('acme/empty', undefined)).toEqual([]);
+  });
+
+  it('reports HTTP errors with the status', async () => {
+    mockFetch({});
+    await expect(fetchEndpoints('acme/missing', undefined)).rejects.toThrow(
+      /OpenRouter 404.*model not found/,
+    );
+  });
+
+  it('rejects malformed endpoint data instead of trusting the response shape', async () => {
+    mockFetch({
+      [`${API}/models/acme/model/endpoints`]: {
+        data: { endpoints: [{ tag: 'acme/model', pricing: { prompt: 42 } }] },
+      },
+    });
+    await expect(fetchEndpoints('acme/model', undefined)).rejects.toThrow('expected string');
+  });
+
+  it('serves a cached listing for 10 minutes', async () => {
+    vi.useFakeTimers();
+    const fetch = mockFetch({ [`${API}/models/openai/gpt-6-sol/endpoints`]: sol });
+    await fetchEndpoints('openai/gpt-6-sol', undefined);
+    vi.advanceTimersByTime(9 * 60 * 1000);
+    await fetchEndpoints('openai/gpt-6-sol', undefined);
+    expect(fetch).toHaveBeenCalledTimes(1);
+
+    vi.advanceTimersByTime(2 * 60 * 1000);
+    await fetchEndpoints('openai/gpt-6-sol', undefined);
+    expect(fetch).toHaveBeenCalledTimes(2);
+  });
+});
+
+// file: packages/plugin/tests/pin.test.ts
+import { describe, expect, it } from 'vitest';
+import { pinProvider } from '../src/pin.ts';
+
+describe('pinProvider', () => {
+  it('adds a strict provider preference', () => {
+    expect(pinProvider({ model: 'openai/gpt-6-sol' }, 'openai/flex')).toEqual({
+      model: 'openai/gpt-6-sol',
+      provider: { only: ['openai/flex'], allow_fallbacks: false },
+    });
+  });
+
+  it('replaces order and fallbacks but keeps other provider settings', () => {
+    const pinned = pinProvider(
+      {
+        provider: {
+          order: ['azure'],
+          allow_fallbacks: true,
+          sort: 'price',
+          data_collection: 'deny',
+        },
+      },
+      'openai/flex',
+    );
+    expect(pinned.provider).toEqual({
+      only: ['openai/flex'],
+      allow_fallbacks: false,
+      sort: 'price',
+      data_collection: 'deny',
+    });
+  });
+
+  it('replaces a malformed provider value with a valid strict preference', () => {
+    expect(pinProvider({ provider: 'invalid' }, 'openai/flex')).toEqual({
+      provider: { only: ['openai/flex'], allow_fallbacks: false },
+    });
+  });
+
+  it("leaves the variant's reasoning and the rest of the body untouched", () => {
+    const body = {
+      reasoning: { effort: 'high' },
+      service_tier: 'flex',
+      messages: [{ role: 'user', content: 'ok' }],
+    };
+    const pinned = pinProvider(body, 'openai/flex');
+    expect(pinned.reasoning).toBe(body.reasoning);
+    expect(pinned.service_tier).toBe('flex');
+    expect(pinned.messages).toBe(body.messages);
+  });
+
+  it('does not mutate its input', () => {
+    const body = { provider: { order: ['azure'] } };
+    pinProvider(body, 'openai/flex');
+    expect(body).toEqual({ provider: { order: ['azure'] } });
+  });
+});
+
+// file: packages/plugin/tests/server.test.ts
+import { readFileSync, rmSync } from 'node:fs';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { setupPlugin } from '../src/setup.ts';
+import { Credential as CredentialSchema, Plugin } from '@opencode/plugin';
+import { Schema } from 'effect';
+import { Agent } from '@opencode/schema/agent';
+import { Model } from '@opencode/schema/model';
+import { Provider } from '@opencode/schema/provider';
+import { Session } from '@opencode/schema/session';
+import type { SessionHttpRequest } from '@opencode/plugin/promise/session';
+import sol from './fixtures/gpt-6-sol.endpoints.json' with { type: 'json' };
+import { DEBUG_LOG } from '../src/debug.ts';
+import { clearEndpointCache } from '../src/openrouter.ts';
+
+type Credential = Schema.Schema.Type<typeof CredentialSchema.Value>;
+const makeCredential = (value: unknown): Credential =>
+  Schema.decodeUnknownSync(CredentialSchema.Value)(value);
+const CHOICE = {
+  tag: 'openai/flex',
+  provider: 'OpenAI',
+  tier: 'flex',
+  input: 1,
+  output: 5,
+} as const;
+const signal = new AbortController().signal;
+
+/** Minimal stand-in for the server plugin context: only what the plugin touches. */
+async function start(credential?: Credential) {
+  const storage = new Map<string, Awaited<ReturnType<Plugin.Context['storage']['get']>>>();
+  const handlers: Record<
+    string,
+    (input: unknown, context: { signal: AbortSignal }) => Promise<unknown>
+  > = {};
+  const emit = vi.fn<(...args: unknown[]) => Promise<void>>(async () => {});
+  let hook:
+    | {
+        name: string;
+        callback: (event: SessionHttpRequest) => void | Promise<void>;
+        options: unknown;
+      }
+    | undefined;
+
+  const ctx = {
+    storage: {
+      get: async (key) => storage.get(key),
+      set: async (key, value) => void storage.set(key, value),
+      remove: async (key) => void storage.delete(key),
+    },
+    rpc: {
+      register: async (_definition, registered) => {
+        Object.assign(handlers, registered);
+        return { dispose: async () => {}, events: { emit } };
+      },
+    },
+    session: {
+      hook: async (name, callback, options) => {
+        hook = { name, callback, options };
+        return { dispose: async () => {} };
+      },
+    },
+    integration: {
+      connection: {
+        active: async () =>
+          credential
+            ? {
+                id: 'connection',
+                type: 'credential' as const,
+                label: 'Connection',
+                method: credential.type,
+              }
+            : undefined,
+        resolve: async () => credential,
+      },
+    },
+  } satisfies Parameters<typeof setupPlugin>[0];
+  await setupPlugin(ctx);
+
+  const call = (method: string, input: unknown) => handlers[method]!(input, { signal });
+  /** Runs the http.request hook and returns the request that would be sent. */
+  const send = async (request: Request, model = 'openai/gpt-6-sol') => {
+    const event: SessionHttpRequest = {
+      sessionID: Schema.decodeUnknownSync(Session.ID)('ses_test'),
+      agent: Schema.decodeUnknownSync(Agent.ID)('build'),
+      model: { providerID: Provider.ID.openrouter, id: Schema.decodeUnknownSync(Model.ID)(model) },
+      kind: 'primary',
+      request,
+    };
+    await hook!.callback(event);
+    return event.request;
+  };
+  return { storage, call, send, emit, hook: () => hook! };
+}
+
+const chatRequest = (body: unknown, init: RequestInit = {}) =>
+  new Request('https://openrouter.ai/api/v1/chat/completions', {
+    method: 'POST',
+    headers: {
+      'content-type': 'application/json',
+      authorization: 'Bearer sk-or-test',
+      'content-length': '999',
+    },
+    body: JSON.stringify(body),
+    ...init,
+  });
+
+beforeEach(() => clearEndpointCache());
+afterEach(() => {
+  vi.unstubAllGlobals();
+  vi.unstubAllEnvs();
+  rmSync(DEBUG_LOG, { force: true });
+});
+
+describe('http.request hook', () => {
+  it('is scoped to the openrouter provider', async () => {
+    const { hook } = await start();
+    expect(hook().name).toBe('http.request');
+    expect(hook().options).toEqual({ providerID: 'openrouter' });
+  });
+
+  it('leaves the request untouched without a pin or debug log', async () => {
+    const { send } = await start();
+    const request = chatRequest({ model: 'openai/gpt-6-sol' });
+    expect(await send(request)).toBe(request);
+  });
+
+  it("pins the chosen endpoint and keeps the variant's reasoning", async () => {
+    const { call, send } = await start();
+    await call('setChoice', { model: 'openai/gpt-6-sol', choice: CHOICE });
+
+    const sent = await send(
+      chatRequest({ model: 'openai/gpt-6-sol', reasoning: { effort: 'high' } }),
+    );
+    expect(await sent.json()).toEqual({
+      model: 'openai/gpt-6-sol',
+      reasoning: { effort: 'high' },
+      provider: { only: ['openai/flex'], allow_fallbacks: false },
+    });
+    expect(sent.method).toBe('POST');
+    expect(sent.url).toBe('https://openrouter.ai/api/v1/chat/completions');
+    expect(sent.headers.get('authorization')).toBe('Bearer sk-or-test');
+    // The body changed size: a stale content-length would corrupt the request.
+    expect(sent.headers.get('content-length')).toBeNull();
+  });
+
+  it('only pins the model the choice was made for', async () => {
+    const { call, send } = await start();
+    await call('setChoice', { model: 'openai/gpt-6-sol', choice: CHOICE });
+    const request = chatRequest({ model: 'openai/gpt-6-luna' });
+    expect(await send(request, 'openai/gpt-6-luna')).toBe(request);
+  });
+
+  it('ignores non-POST and non-JSON requests', async () => {
+    const { call, send } = await start();
+    await call('setChoice', { model: 'openai/gpt-6-sol', choice: CHOICE });
+    const get = new Request('https://openrouter.ai/api/v1/models');
+    expect(await send(get)).toBe(get);
+    const text = new Request('https://openrouter.ai/api/v1/x', {
+      method: 'POST',
+      body: 'hi',
+      headers: { 'content-type': 'text/plain' },
+    });
+    expect(await send(text)).toBe(text);
+  });
+
+  it('ignores malformed or non-object JSON bodies', async () => {
+    const { call, send } = await start();
+    await call('setChoice', { model: 'openai/gpt-6-sol', choice: CHOICE });
+
+    await Promise.all(
+      ['null', '[]', '{'].map(async (body) => {
+        const request = new Request('https://openrouter.ai/api/v1/chat/completions', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body,
+        });
+        expect(await send(request)).toBe(request);
+      }),
+    );
+  });
+
+  it('rereads the choice from storage on every request', async () => {
+    // Regression: each location runs its own plugin instance over shared storage, so an
+    // in-memory cache served a stale pin after another location changed it.
+    const { storage, call, send } = await start();
+    await call('setChoice', { model: 'openai/gpt-6-sol', choice: CHOICE });
+    storage.set(`choice/${encodeURIComponent('openai/gpt-6-sol')}`, {
+      ...CHOICE,
+      tag: 'azure',
+      tier: 'default',
+    });
+
+    const sent = await send(chatRequest({}));
+    const result: unknown = await sent.json();
+    expect(result).toMatchObject({ provider: { only: ['azure'] } });
+  });
+
+  it('logs what is actually sent when debug is on', async () => {
+    const { call, send } = await start();
+    await call('debug', { enabled: true });
+    await call('setChoice', { model: 'openai/gpt-6-sol', choice: CHOICE });
+    await send(chatRequest({ reasoning: { effort: 'low' }, provider: { order: ['azure'] } }));
+
+    const line = readFileSync(DEBUG_LOG, 'utf8').trim();
+    expect(line).toContain('model=openai/gpt-6-sol');
+    expect(line).toContain('kind=primary');
+    expect(line).toContain('reasoning={"effort":"low"}');
+    expect(line).toContain('provider={"only":["openai/flex"],"allow_fallbacks":false}');
+  });
+
+  it('logs unpinned requests too when debug is on', async () => {
+    const { call, send } = await start();
+    await call('debug', { enabled: true });
+    const request = chatRequest({ reasoning: { effort: 'high' } });
+    expect(await send(request)).toBe(request);
+    expect(readFileSync(DEBUG_LOG, 'utf8')).toContain('reasoning={"effort":"high"}');
+  });
+});
+
+describe('RPC', () => {
+  it('stores, emits and clears a choice', async () => {
+    const { call, emit, storage } = await start();
+    expect(await call('setChoice', { model: 'openai/gpt-6-sol', choice: CHOICE })).toEqual({
+      choice: CHOICE,
+    });
+    expect(emit).toHaveBeenCalledWith('choice', { model: 'openai/gpt-6-sol', choice: CHOICE });
+    expect(await call('getChoice', { model: 'openai/gpt-6-sol' })).toEqual({ choice: CHOICE });
+
+    await call('setChoice', { model: 'openai/gpt-6-sol', choice: null });
+    expect(storage.size).toBe(0);
+    expect(emit).toHaveBeenLastCalledWith('choice', { model: 'openai/gpt-6-sol', choice: null });
+    expect(await call('getChoice', { model: 'openai/gpt-6-sol' })).toEqual({ choice: null });
+  });
+
+  it('ignores an invalid stored choice', async () => {
+    const { call, storage } = await start();
+    storage.set(`choice/${encodeURIComponent('openai/gpt-6-sol')}`, { tag: 42 });
+    expect(await call('getChoice', { model: 'openai/gpt-6-sol' })).toEqual({ choice: null });
+  });
+
+  it('toggles debug and reports the log path', async () => {
+    const { call } = await start();
+    expect(await call('debug', {})).toEqual({ enabled: false, log: DEBUG_LOG });
+    expect(await call('debug', { enabled: true })).toEqual({ enabled: true, log: DEBUG_LOG });
+    expect(await call('debug', {})).toMatchObject({ enabled: true });
+  });
+
+  describe('listEndpoints API key', () => {
+    const listWith = async (storedCredential: Credential | undefined) => {
+      const fetch = vi.fn<typeof globalThis.fetch>(async () => new Response(JSON.stringify(sol)));
+      vi.stubGlobal('fetch', fetch);
+      const { call } = await start(storedCredential);
+      expect(await call('listEndpoints', { model: 'openai/gpt-6-sol' })).toMatchObject({
+        endpoints: expect.arrayContaining([expect.objectContaining({ tag: 'openai/flex' })]),
+      });
+      const headers = new Headers(fetch.mock.calls[0]?.[1]?.headers);
+      return { authorization: headers.get('authorization') };
+    };
+
+    it('uses an API key credential', async () => {
+      expect(await listWith(makeCredential({ type: 'key', key: 'sk-or-key' }))).toEqual({
+        authorization: 'Bearer sk-or-key',
+      });
+    });
+    it('uses an OAuth access token', async () => {
+      expect(
+        await listWith(
+          makeCredential({
+            type: 'oauth',
+            methodID: 'oauth',
+            refresh: 'refresh-token',
+            access: 'oauth-token',
+            expires: 0,
+          }),
+        ),
+      ).toEqual({
+        authorization: 'Bearer oauth-token',
+      });
+    });
+    it('falls back to OPENROUTER_API_KEY', async () => {
+      vi.stubEnv('OPENROUTER_API_KEY', 'sk-or-env');
+      expect(await listWith(undefined)).toEqual({ authorization: 'Bearer sk-or-env' });
+    });
+  });
+});
+
+// file: packages/plugin/tests/setup.ts
+import { mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { afterAll } from 'vitest';
+
+// MODEL_STATE_FILE and DEBUG_LOG are resolved when their modules load, so the XDG dirs must
+// point to a sandbox before any test imports them. Setup files run before test modules.
+const sandbox = mkdtempSync(path.join(tmpdir(), 'orpm-tests-'));
+process.env.XDG_STATE_HOME = path.join(sandbox, 'state');
+process.env.XDG_DATA_HOME = path.join(sandbox, 'data');
+delete process.env.OPENROUTER_API_KEY;
+
+afterAll(() => rmSync(sandbox, { recursive: true, force: true }));
+
+// file: packages/plugin/tests/tui-state.test.ts
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { afterEach, describe, expect, it } from 'vitest';
+import { MODEL_STATE_FILE, pickedModel } from '../src/tui-state.ts';
+
+function writeState(content: unknown) {
+  mkdirSync(path.dirname(MODEL_STATE_FILE), { recursive: true });
+  writeFileSync(MODEL_STATE_FILE, typeof content === 'string' ? content : JSON.stringify(content));
+}
+
+afterEach(() => rmSync(MODEL_STATE_FILE, { force: true }));
+
+describe('pickedModel', () => {
+  it('lives in the sandboxed XDG state dir', () => {
+    expect(MODEL_STATE_FILE).toBe(path.join(process.env.XDG_STATE_HOME!, 'opencode', 'model.json'));
+  });
+
+  it('reads the most recent pick with its variant', () => {
+    writeState({
+      recent: [
+        { providerID: 'openrouter', modelID: 'openai/gpt-6-luna' },
+        { providerID: 'openrouter', modelID: 'openai/gpt-6-sol' },
+      ],
+      variant: { 'openrouter/openai/gpt-6-luna': 'high', 'openrouter/openai/gpt-6-sol': 'low' },
+    });
+    expect(pickedModel()?.model).toEqual({
+      providerID: 'openrouter',
+      id: 'openai/gpt-6-luna',
+      variant: 'high',
+    });
+  });
+
+  it('treats the default variant as no variant', () => {
+    writeState({
+      recent: [{ providerID: 'openrouter', modelID: 'upstage/solar-mini4' }],
+      variant: { 'openrouter/upstage/solar-mini4': 'default' },
+    });
+    expect(pickedModel()?.model.variant).toBeUndefined();
+  });
+
+  it('returns nothing for a missing, empty or corrupt file', () => {
+    expect(pickedModel()).toBeUndefined();
+    writeState({ recent: [] });
+    expect(pickedModel()).toBeUndefined();
+    writeState('{not json');
+    expect(pickedModel()).toBeUndefined();
+  });
+
+  it('rejects state whose fields have invalid shapes', () => {
+    writeState({ recent: [{ providerID: 42, modelID: 'openai/gpt-6-sol' }] });
+    expect(pickedModel()).toBeUndefined();
+
+    writeState({ variant: { 'openrouter/openai/gpt-6-sol': 42 } });
+    expect(pickedModel()).toBeUndefined();
+  });
+});
+
+// file: packages/plugin/tui.tsx
+import { Plugin } from '@opencode/plugin/tui';
+import { watch } from 'node:fs';
+import path from 'node:path';
+import { createEffect, Show } from 'solid-js';
+import { type Choice, type Endpoint, OpenRouterProviders } from './rpc.ts';
+import { degraded, price, summary, tokens } from './src/format.ts';
+import { resolveModel } from './src/model.ts';
+import { MODEL_STATE_FILE, type ModelRef, pickedModel } from './src/tui-state.ts';
+import type { DialogSelectOption } from '@opencode/plugin/tui/context';
+
+const PROVIDER = 'openrouter';
+const COMMAND = 'openrouter.provider';
+const AUTO = '__auto__';
+
+type Theme = Plugin.Context['theme'];
+type Color = Theme['text']['base'];
+type ColoredOption = DialogSelectOption<string> & { footerColor?: Color; searchText: string };
+
+/** Flex and priority endpoints stand out; default ones use the surrounding color. */
+function tierColor(theme: Theme, tier: Endpoint['tier']): Color | undefined {
+  if (tier === 'flex') return theme.text.feedback.success.base;
+  if (tier === 'priority') return theme.text.feedback.warning.base;
+  return undefined;
+}
+const HOME = '__home__';
+
+export default Plugin.define({
+  id: 'openrouter-provider-manager.tui',
+  setup(ctx) {
+    const rpc = ctx.client.rpc(OpenRouterProviders);
+    // model id -> choice (null = Auto). Absent key = not loaded yet.
+    const [choices, updateChoices] = ctx.storage.memory<Record<string, Choice | null>>('choices', {
+      initial: {},
+    });
+    const loading = new Set<string>();
+
+    function load(model: string) {
+      if (model in choices || loading.has(model)) return;
+      loading.add(model);
+      rpc
+        .getChoice({ model })
+        .then(({ choice }) => updateChoices((draft) => void (draft[model] = choice)))
+        .catch(() => {})
+        .finally(() => loading.delete(model));
+    }
+
+    const stopChoiceEvents = rpc.events.on('choice', (event) => {
+      updateChoices((draft) => void (draft[event.data.model] = event.data.choice));
+    });
+
+    // Picks made in the TUI's model picker, keyed by the screen they were made on (a session
+    // ID, or HOME). A pick only applies where it was made: reopening a session makes the TUI
+    // restore that session's model, whatever was picked elsewhere since.
+    const [picks, updatePicks] = ctx.storage.memory<Record<string, ModelRef>>('picks', {
+      initial: {},
+    });
+    const screen = () => {
+      const route = ctx.ui.router.current();
+      return route.type === 'session' ? route.sessionID : HOME;
+    };
+    let watcher: ReturnType<typeof watch> | undefined;
+    try {
+      watcher = watch(path.dirname(MODEL_STATE_FILE), (_event, file) => {
+        if (file !== path.basename(MODEL_STATE_FILE)) return;
+        const picked = pickedModel()?.model;
+        if (picked) updatePicks((draft) => void (draft[screen()] = picked));
+      });
+    } catch {}
+
+    function sessionModel(sessionID: string | undefined): ModelRef | undefined {
+      return sessionID ? ctx.data.session.get(sessionID)?.model : undefined;
+    }
+
+    /** A pick made on this screen, else the session's model; on the home screen, the last pick. */
+    function currentModel(sessionID: string | undefined): ModelRef | undefined {
+      return resolveModel({
+        sessionID,
+        sessionModel: sessionModel(sessionID),
+        pick: picks[sessionID ?? HOME],
+        lastPicked: () => pickedModel()?.model,
+      });
+    }
+
+    async function activeModel(): Promise<ModelRef | undefined> {
+      const route = ctx.ui.router.current();
+      const current = currentModel(route.type === 'session' ? route.sessionID : undefined);
+      if (current) return current;
+      const fallback = await ctx.client.model.default().catch(() => undefined);
+      const info = fallback?.data as { providerID?: string; id?: string } | null | undefined;
+      return info?.providerID && info.id ? { providerID: info.providerID, id: info.id } : undefined;
+    }
+
+    function option(endpoint: Endpoint, model: ModelRef): ColoredOption {
+      const warnings = [
+        degraded(endpoint) ? 'degraded' : '',
+        model.variant && !endpoint.reasoning ? `ignores "${model.variant}" effort` : '',
+      ].filter(Boolean);
+      const footerColor = tierColor(ctx.theme, endpoint.tier);
+      return {
+        title: endpoint.provider,
+        value: endpoint.tag,
+        description: [
+          `${price(endpoint.input)} in / ${price(endpoint.output)} out /M`,
+          `ctx ${tokens(endpoint.context)}`,
+          endpoint.quantization ?? '',
+          endpoint.uptime !== null ? `uptime ${endpoint.uptime.toFixed(1)}%` : '',
+          ...warnings,
+        ]
+          .filter(Boolean)
+          .join(' · '),
+        footer: endpoint.tag,
+        // OpenCode searches title/category/searchText, not footer. Both extra fields are
+        // undocumented; if support disappears, the tag still renders as plain text.
+        searchText: endpoint.tag,
+        ...(footerColor ? { footerColor } : undefined),
+      };
+    }
+
+    const dialogTitle = (model: ModelRef) =>
+      `Endpoint OpenRouter · ${model.id}${model.variant ? ` #${model.variant}` : ''}`;
+
+    async function pick() {
+      const model = await activeModel();
+      if (!model || model.providerID !== PROVIDER) {
+        ctx.ui.toast.show({
+          title: 'OpenRouter',
+          message: model
+            ? `${model.providerID}/${model.id} is not an OpenRouter model.`
+            : 'No active model.',
+          variant: 'warning',
+        });
+        return;
+      }
+
+      // Fetching endpoints can take a few seconds: show a loader right away. Esc closes it
+      // and aborts the request.
+      const abort = new AbortController();
+      let loaded = false;
+      ctx.ui.dialog.show(
+        () => <Loading ctx={ctx} title={dialogTitle(model)} />,
+        () => loaded || abort.abort(),
+      );
+      const [listed, stored] = await Promise.all([
+        rpc
+          .listEndpoints({ model: model.id }, { signal: abort.signal })
+          .catch((error: unknown) => (error instanceof Error ? error : new Error(String(error)))),
+        rpc.getChoice({ model: model.id }).catch(() => ({ choice: null })),
+      ]);
+      loaded = true;
+      if (abort.signal.aborted) return;
+      if (listed instanceof Error) {
+        ctx.ui.dialog.clear();
+        ctx.ui.toast.show({
+          title: 'OpenRouter',
+          message: listed.message,
+          variant: 'error',
+        });
+        return;
+      }
+
+      const current = stored.choice?.tag ?? AUTO;
+      const selection = ctx.ui.dialog.select<string>({
+        title: dialogTitle(model),
+        placeholder: 'Filter providers…',
+        current,
+        options: [
+          {
+            title: 'Auto',
+            value: AUTO,
+            description: 'Default OpenRouter routing (price, availability, fallbacks)',
+          },
+          ...listed.endpoints.map((endpoint) => option(endpoint, model)),
+        ],
+      });
+      // Prices and warnings don't fit the default width.
+      ctx.ui.dialog.set({ size: 'large' });
+      const value = await selection;
+      if (value === undefined || value === current) return;
+      await apply(model, value, listed.endpoints);
+    }
+
+    async function apply(model: ModelRef, value: string, endpoints: readonly Endpoint[]) {
+      const endpoint = endpoints.find((e) => e.tag === value);
+      const choice: Choice | null = endpoint
+        ? {
+            tag: endpoint.tag,
+            provider: endpoint.provider,
+            tier: endpoint.tier,
+            input: endpoint.input,
+            output: endpoint.output,
+          }
+        : null;
+      await rpc.setChoice({ model: model.id, choice });
+      updateChoices((draft) => void (draft[model.id] = choice));
+      ctx.ui.toast.show({
+        title: 'OpenRouter',
+        message: choice
+          ? `${model.id} → ${summary(choice)} (strict)`
+          : `${model.id} → automatic routing`,
+        variant: 'success',
+      });
+    }
+
+    // Request logging is a plugin option (cli.json `plugins[].options.debug`), mirrored to the
+    // server plugin, which owns the request hook. Absent or false turns it off.
+    const debug = ctx.options.debug === true;
+    rpc
+      .debug({ enabled: debug })
+      .then(({ log }) => {
+        if (debug)
+          ctx.ui.toast.show({
+            title: 'OpenRouter',
+            message: `Request log enabled: ${log}`,
+            variant: 'info',
+          });
+        return undefined;
+      })
+      .catch(() => undefined);
+
+    // keymap.layer needs the host's Keymap provider, which only exists inside the rendered
+    // tree: register it from an invisible component mounted in the `app` slot.
+    ctx.ui.slot({
+      append: 'app',
+      render: () => {
+        ctx.keymap.layer(() => ({
+          mode: 'global',
+          commands: [
+            {
+              id: COMMAND,
+              title: 'OpenRouter: choose endpoint',
+              description: 'Pin an OpenRouter provider for the active model',
+              group: 'OpenRouter',
+              bind: '<leader>o',
+              palette: true,
+              slash: { name: 'provider' },
+              run: () => pick(),
+            },
+          ],
+          bindings: [COMMAND],
+        }));
+        return null;
+      },
+    });
+
+    ctx.ui.slot({
+      // First in the sidebar, right above the built-in "Context" section.
+      prepend: 'sidebar.content',
+      render: (input) => (
+        <SidebarSection
+          ctx={ctx}
+          model={() => currentModel(input.sessionID)}
+          choices={choices}
+          load={load}
+        />
+      ),
+    });
+
+    const stopModelSelected = ctx.data.on('session.model.selected', (event): void => {
+      updatePicks((draft): void => {
+        Reflect.deleteProperty(draft, event.data.sessionID);
+      });
+    });
+
+    // A strict pin fails loudly when its endpoint is down; point the user at the fix.
+    const stopFailures = ctx.data.on('session.execution.failed', (event) => {
+      const model = sessionModel(event.data.sessionID);
+      const choice = model?.providerID === PROVIDER ? choices[model.id] : undefined;
+      if (!choice) return;
+      ctx.ui.toast.show({
+        title: 'OpenRouter',
+        message: `Request failed on pinned endpoint ${choice.tag}. Use /provider to switch or go back to Auto.`,
+        variant: 'error',
+        sessionID: event.data.sessionID,
+      });
+    });
+
+    return () => {
+      stopChoiceEvents();
+      stopFailures();
+      stopModelSelected();
+      watcher?.close();
+    };
+  },
+});
+
+function SidebarSection(props: {
+  ctx: Plugin.Context;
+  model: () => ModelRef | undefined;
+  choices: Record<string, Choice | null>;
+  load: (model: string) => void;
+}) {
+  const openrouter = () => {
+    const ref = props.model();
+    return ref?.providerID === PROVIDER ? ref.id : undefined;
+  };
+  createEffect(() => {
+    const id = openrouter();
+    if (id) props.load(id);
+  });
+  const choice = () => {
+    const id = openrouter();
+    return id ? props.choices[id] : undefined;
+  };
+  const color = () => {
+    const pinned = choice();
+    const theme = props.ctx.theme;
+    if (!pinned) return theme.text.muted;
+    return tierColor(theme, pinned.tier) ?? theme.text.base;
+  };
+  // Mirrors the built-in Context section: bold title, then muted detail lines.
+  return (
+    <Show when={openrouter()}>
+      <box>
+        <text fg={props.ctx.theme.text.base}>
+          <b>OpenRouter</b>
+        </text>
+        <Show when={choice()} fallback={<text fg={color()}>Auto (OpenRouter routing)</text>}>
+          {(pinned: () => Choice) => (
+            <>
+              <text fg={color()}>{pinned().tag}</text>
+              <text fg={props.ctx.theme.text.muted}>
+                {price(pinned().input)} in · {price(pinned().output)} out /M
+              </text>
+            </>
+          )}
+        </Show>
+      </box>
+    </Show>
+  );
+}
+
+function Loading(props: { ctx: Plugin.Context; title: string }) {
+  return (
+    <box paddingLeft={2} paddingRight={2} paddingBottom={1} gap={1}>
+      <text fg={props.ctx.theme.text.base}>
+        <b>{props.title}</b>
+      </text>
+      <box flexDirection="row" gap={1}>
+        <spinner interval={80} color={props.ctx.theme.text.muted} />
+        <text fg={props.ctx.theme.text.muted}>Loading endpoints…</text>
+      </box>
+    </box>
+  );
+}
+
+// file: packages/bench/client.ts
+import { z } from 'zod';
+
+/**
+ * Streams one chat completion and measures it (SPEC §7). Only metrics come back: the response
+ * text is never kept, and tool calls are returned solely so the agentic workload can replay them.
+ */
+
+const API = 'https://openrouter.ai/api/v1';
+const MESSAGE_LENGTH = 200;
+
+export type Status =
+  | 'ok'
+  | 'truncated'
+  | 'http_4xx'
+  | 'http_429'
+  | 'http_5xx'
+  | 'timeout'
+  | 'stream_error';
+
+export type ToolCall = { id: string; name: string; arguments: string };
+
+export type RequestMetrics = {
+  status: Status;
+  /** HTTP or stream error code, and a message cut to 200 characters. */
+  error: { code: number | null; message: string } | null;
+  generationId: string | null;
+  finishReason: string | null;
+  /** First delta carrying text: reasoning, content or tool call arguments. */
+  ttftMs: number | null;
+  /** First visible content token. */
+  ttfvtMs: number | null;
+  totalMs: number;
+  outputTps: number | null;
+  promptTokens: number | null;
+  completionTokens: number | null;
+  reasoningTokens: number | null;
+  cachedTokens: number | null;
+  costUsd: number | null;
+  toolCalls: ToolCall[];
+};
+
+export type ClientOptions = {
+  apiKey: string;
+  fetch?: typeof fetch;
+  timeoutMs?: number;
+  now?: () => number;
+};
+
+const Usage = z.object({
+  prompt_tokens: z.number().optional(),
+  completion_tokens: z.number().optional(),
+  cost: z.number().optional(),
+  prompt_tokens_details: z.object({ cached_tokens: z.number().optional() }).nullish(),
+  completion_tokens_details: z.object({ reasoning_tokens: z.number().optional() }).nullish(),
+});
+
+const Chunk = z.object({
+  id: z.string().optional(),
+  error: z.object({ code: z.unknown().optional(), message: z.string().optional() }).optional(),
+  usage: Usage.nullish(),
+  choices: z
+    .array(
+      z.object({
+        finish_reason: z.string().nullish(),
+        delta: z
+          .object({
+            content: z.string().nullish(),
+            reasoning: z.string().nullish(),
+            tool_calls: z
+              .array(
+                z.object({
+                  index: z.number(),
+                  id: z.string().optional(),
+                  function: z
+                    .object({ name: z.string().optional(), arguments: z.string().optional() })
+                    .optional(),
+                }),
+              )
+              .nullish(),
+          })
+          .optional(),
+      }),
+    )
+    .optional(),
+});
+
+/** The JSON payloads of an SSE stream, until `[DONE]`. Comment lines are keep-alives. */
+export async function* parseSse(stream: ReadableStream, signal?: AbortSignal): AsyncGenerator {
+  const reader = stream.getReader();
+  // Aborting ends a stalled read, so a timeout also covers a body that stops sending.
+  const cancel = async () => reader.cancel(signal?.reason).catch(() => undefined);
+  signal?.addEventListener('abort', cancel, { once: true });
+  if (signal?.aborted) await cancel();
+  const decoder = new TextDecoder();
+  let buffer = '';
+  try {
+    for (;;) {
+      // oxlint-disable-next-line no-await-in-loop -- a stream is read one chunk at a time
+      const { done, value } = await reader.read();
+      if (done || signal?.aborted) return;
+      buffer += decoder.decode(value, { stream: true });
+      let end = buffer.indexOf('\n');
+      while (end !== -1) {
+        const line = buffer.slice(0, end).replace(/\r$/, '');
+        buffer = buffer.slice(end + 1);
+        end = buffer.indexOf('\n');
+        if (!line.startsWith('data:')) continue;
+        const data = line.slice(5).trim();
+        if (data === '[DONE]') return;
+        if (data) yield JSON.parse(data);
+      }
+    }
+  } finally {
+    signal?.removeEventListener('abort', cancel);
+    reader.releaseLock();
+  }
+}
+
+const truncate = (text: string) => text.slice(0, MESSAGE_LENGTH);
+
+function httpStatus(code: number): Status {
+  if (code === 429) return 'http_429';
+  return code >= 500 ? 'http_5xx' : 'http_4xx';
+}
+
+/** Sends `body` as a streamed request with usage accounting, and times it. */
+export async function send(
+  body: Record<string, unknown>,
+  {
+    apiKey,
+    fetch: fetchImpl = globalThis.fetch,
+    timeoutMs = 120_000,
+    now = () => performance.now(),
+  }: ClientOptions,
+): Promise<RequestMetrics> {
+  const signal = AbortSignal.timeout(timeoutMs);
+  const start = now();
+  const metrics: RequestMetrics = {
+    status: 'ok',
+    error: null,
+    generationId: null,
+    finishReason: null,
+    ttftMs: null,
+    ttfvtMs: null,
+    totalMs: 0,
+    outputTps: null,
+    promptTokens: null,
+    completionTokens: null,
+    reasoningTokens: null,
+    cachedTokens: null,
+    costUsd: null,
+    toolCalls: [],
+  };
+  const fail = (status: Status, message: string, code: number | null = null) => {
+    metrics.status = status;
+    metrics.error = { code, message: truncate(message) };
+  };
+  let tFirst: number | null = null;
+
+  try {
+    const response = await fetchImpl(`${API}/chat/completions`, {
+      method: 'POST',
+      headers: { authorization: `Bearer ${apiKey}`, 'content-type': 'application/json' },
+      body: JSON.stringify({ ...body, stream: true, usage: { include: true } }),
+      signal,
+    });
+    if (!response.ok || !response.body) {
+      const text = await response.text().catch(() => '');
+      fail(httpStatus(response.status), text || response.statusText, response.status);
+    } else {
+      const calls = new Map<number, ToolCall>();
+      for await (const payload of parseSse(response.body, signal)) {
+        const chunk = Chunk.parse(payload);
+        const t = now();
+        metrics.generationId ??= chunk.id ?? null;
+        if (chunk.error) {
+          const code = typeof chunk.error.code === 'number' ? chunk.error.code : null;
+          fail('stream_error', chunk.error.message ?? 'error in stream', code);
+          break;
+        }
+        for (const choice of chunk.choices ?? []) {
+          const delta = choice.delta;
+          const content = delta?.content ?? '';
+          let text = content.length > 0 || (delta?.reasoning ?? '').length > 0;
+          for (const call of delta?.tool_calls ?? []) {
+            const seen = calls.get(call.index) ?? { id: '', name: '', arguments: '' };
+            seen.id ||= call.id ?? '';
+            seen.name += call.function?.name ?? '';
+            seen.arguments += call.function?.arguments ?? '';
+            calls.set(call.index, seen);
+            text ||= (call.function?.arguments ?? '').length > 0;
+          }
+          if (text) tFirst ??= t;
+          if (content.length > 0) metrics.ttfvtMs ??= t - start;
+          if (choice.finish_reason) metrics.finishReason = choice.finish_reason;
+        }
+        if (chunk.usage) {
+          const usage = chunk.usage;
+          metrics.promptTokens = usage.prompt_tokens ?? null;
+          metrics.completionTokens = usage.completion_tokens ?? null;
+          metrics.reasoningTokens = usage.completion_tokens_details?.reasoning_tokens ?? null;
+          metrics.cachedTokens = usage.prompt_tokens_details?.cached_tokens ?? null;
+          metrics.costUsd = usage.cost ?? null;
+        }
+      }
+      metrics.toolCalls = [...calls.entries()].toSorted(([a], [b]) => a - b).map(([, c]) => c);
+      if (signal.aborted) fail('timeout', `no end of stream after ${timeoutMs}ms`);
+      else if (metrics.status === 'ok' && metrics.finishReason === null)
+        fail('stream_error', 'stream ended without a finish reason');
+      else if (metrics.status === 'ok' && metrics.finishReason === 'length')
+        metrics.status = 'truncated';
+    }
+  } catch (error) {
+    if (signal.aborted) fail('timeout', `no response after ${timeoutMs}ms`);
+    else fail('stream_error', error instanceof Error ? error.message : String(error));
+  }
+
+  const tEnd = now();
+  metrics.totalMs = tEnd - start;
+  if (tFirst !== null) {
+    metrics.ttftMs = tFirst - start;
+    if (metrics.completionTokens !== null && tEnd > tFirst)
+      metrics.outputTps = (metrics.completionTokens * 1000) / (tEnd - tFirst);
+  }
+  return metrics;
+}
+
+const Generation = z.object({
+  data: z.object({
+    provider_name: z.string().nullish(),
+    latency: z.number().nullish(),
+    generation_time: z.number().nullish(),
+  }),
+});
+
+export type Generation = {
+  providerUsed: string | null;
+  latencyMs: number | null;
+  generationTimeMs: number | null;
+};
+
+export type GenerationOptions = {
+  apiKey: string;
+  fetch?: typeof fetch;
+  attempts?: number;
+  delayMs?: number;
+  /** Per attempt: a stalled lookup is abandoned and retried like a missing entry. */
+  attemptTimeoutMs?: number;
+  sleep?: (ms: number) => Promise<void>;
+};
+
+/**
+ * The provider that actually served a generation (the only way to know it for auto), and the
+ * server-side timings. The entry shows up with a delay, so retry with exponential backoff.
+ */
+export async function fetchGeneration(
+  id: string,
+  {
+    apiKey,
+    fetch: fetchImpl = globalThis.fetch,
+    attempts = 5,
+    delayMs = 500,
+    attemptTimeoutMs = 10_000,
+    sleep = async (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
+  }: GenerationOptions,
+): Promise<Generation | null> {
+  /* oxlint-disable no-await-in-loop -- each attempt waits for the previous one to fail */
+  for (let attempt = 0; attempt < attempts; attempt++) {
+    if (attempt > 0) await sleep(delayMs * 2 ** (attempt - 1));
+    try {
+      const response = await fetchImpl(`${API}/generation?id=${encodeURIComponent(id)}`, {
+        headers: { authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(attemptTimeoutMs),
+      });
+      if (!response.ok) continue;
+      const { data } = Generation.parse(await response.json());
+      return {
+        providerUsed: data.provider_name ?? null,
+        latencyMs: data.latency ?? null,
+        generationTimeMs: data.generation_time ?? null,
+      };
+    } catch {
+      // Network or parse error: retry like a missing entry.
+    }
+  }
+  /* oxlint-enable no-await-in-loop */
+  return null;
+}
+
+// file: packages/bench/config.ts
+/**
+ * The benchmark matrix (SPEC §3, §5, §8). Starting values: the dry-run settles the final ones,
+ * and `run.ts` overrides them from the command line.
+ */
+
+export const EFFORTS = ['low', 'medium', 'high'] as const;
+export type Effort = (typeof EFFORTS)[number];
+
+export const WORKLOADS = ['short', 'long', 'agentic', 'big-context'] as const;
+export type Workload = (typeof WORKLOADS)[number];
+
+/** `open-weight` models are cheap, so they get more repetitions than `premium` ones. */
+export type ModelClass = 'open-weight' | 'premium';
+
+export const MODELS: readonly { id: string; class: ModelClass }[] = [
+  { id: 'z-ai/glm-5.3-flash', class: 'open-weight' },
+  { id: 'deepseek/deepseek-v4.1-flash', class: 'open-weight' },
+  { id: 'openai/gpt-6-sol', class: 'premium' },
+];
+
+/**
+ * `max_tokens` per workload × effort. It includes reasoning tokens, so it grows with the effort.
+ * Agentic is per turn. A missing effort is not measured for that workload.
+ */
+export const MAX_TOKENS: Record<Workload, Partial<Record<Effort, number>>> = {
+  short: { low: 2_000, medium: 4_000, high: 8_000 },
+  long: { low: 4_000, medium: 8_000, high: 16_000 },
+  agentic: { medium: 4_000 },
+  'big-context': { medium: 4_000 },
+};
+
+/** Repetitions per cell, warm-up excluded. */
+export const REPETITIONS: Record<Workload, Record<ModelClass, number>> = {
+  short: { 'open-weight': 8, premium: 4 },
+  long: { 'open-weight': 8, premium: 4 },
+  agentic: { 'open-weight': 15, premium: 6 },
+  'big-context': { 'open-weight': 15, premium: 6 },
+};
+
+/** The efforts measured for a workload, in `EFFORTS` order. */
+export function effortsOf(workload: Workload): Effort[] {
+  return EFFORTS.filter((effort) => MAX_TOKENS[workload][effort] !== undefined);
+}
+
+/** Strategies picked from observed usage ignore providers below this many requests. */
+export const MIN_OBSERVED_REQUESTS = 50;
+export const DEFAULT_MAX_USD = 5;
+export const MAX_AGENTIC_TURNS = 8;
+
+/** Requests of one big-context series: one cold call, then calls on the cached prefix (SPEC §5). */
+export const SERIES_LENGTH = 5;
+
+/** Reasoning tokens expected per request, for the dry-run estimate only (never for reservation). */
+export const EXPECTED_REASONING: Record<Effort, number> = { low: 256, medium: 1_024, high: 3_072 };
+
+// file: packages/bench/corpus.ts
+/**
+ * Writes `fixtures/corpus.txt`, the frozen code corpus of the big-context workload (SPEC §5):
+ * the plugin sources, tests and fixtures, then the bench sources, sorted, each behind a
+ * `// file:` header, cut at `CORPUS_CHARS` on a line boundary. Only public repository sources;
+ * the file is committed and regenerated on purpose only, since changing it changes the workload.
+ *
+ *   node corpus.ts
+ */
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { CORPUS_CHARS, CORPUS_FILE } from './workloads/big-context.ts';
+
+const ROOT = path.join(import.meta.dirname, '..', '..');
+const SOURCES = [
+  {
+    dir: 'packages/plugin',
+    include: /^(index\.ts|rpc\.ts|tui\.tsx|(src|tests)\/.*\.(ts|tsx|json))$/,
+  },
+  { dir: 'packages/bench', include: /^([\w-]+\.ts|workloads\/[\w-]+\.ts)$/ },
+];
+
+/** Repository paths of the corpus files, in corpus order. */
+export function corpusFiles(root = ROOT): string[] {
+  return SOURCES.flatMap(({ dir, include }) =>
+    readdirSync(path.join(root, dir), { recursive: true, encoding: 'utf8' })
+      .map((file) => file.split(path.sep).join('/'))
+      .filter((file) => !file.includes('node_modules') && include.test(file))
+      .sort()
+      .map((file) => `${dir}/${file}`),
+  );
+}
+
+export function buildCorpus(root = ROOT, limit = CORPUS_CHARS): string {
+  let text = '';
+  for (const file of corpusFiles(root)) {
+    text += `// file: ${file}\n${readFileSync(path.join(root, file), 'utf8')}\n`;
+    if (text.length >= limit) break;
+  }
+  if (text.length <= limit) return text;
+  return text.slice(0, text.lastIndexOf('\n', limit) + 1);
+}
+
+if (import.meta.main) {
+  const corpus = buildCorpus();
+  mkdirSync(path.dirname(CORPUS_FILE), { recursive: true });
+  writeFileSync(CORPUS_FILE, corpus);
+  console.log(
+    `${corpus.length.toLocaleString('en-US')} characters → ${path.relative(process.cwd(), CORPUS_FILE)}`,
+  );
+}
+
+// file: packages/bench/fake-summary.ts
+/**
+ * Writes `results/summary.fake.json`: a **synthetic** summary shaped like a real run, so the
+ * site can be built before the first measured run (SPEC §10). `run.synthetic` is true, and the
+ * site refuses to ship it (§11.8). Only `observed` and the `coding-agent` profile are real:
+ * they come from the latest `observed/*.json` export.
+ *
+ *   node fake-summary.ts
+ */
+import { mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { latestObserved } from './observe.ts';
+import { profileFromObserved } from './profiles.ts';
+import {
+  type Cell,
+  type CostModel,
+  type EndpointSnapshot,
+  type Headline,
+  type Observed,
+  type Profile,
+  type Sample,
+  type Stat,
+  Summary,
+} from './schema.ts';
+import { quantile, rng, round } from './stats.ts';
+
+const SEED = 20260925;
+
+type Config = {
+  id: string;
+  /** null for auto. */
+  tag: string | null;
+  ttft: number;
+  cost: number;
+  success: number;
+  cacheRatio: number;
+  /** Log-normal sigma of the TTFT: Auto spreads more because it changes hosts. */
+  spread: number;
+};
+
+type ModelSpec = {
+  model: string;
+  /** Workload scale: open-weight models get the most repetitions (SPEC §8). */
+  n: { core: number; light: number };
+  ttft: number;
+  cost: number;
+  endpoints: Omit<EndpointSnapshot, 'model'>[];
+  configs: Config[];
+  autoProviders: Record<string, number>;
+};
+
+const endpoint = (
+  tag: string,
+  provider: string,
+  input: number,
+  output: number,
+  cached: number | null,
+  tier: EndpointSnapshot['tier'] = 'default',
+): Omit<EndpointSnapshot, 'model'> => ({
+  tag,
+  provider,
+  tier,
+  input,
+  output,
+  cached,
+  context: 1_048_576,
+  quantization: null,
+  status: 0,
+  uptime: 99.5,
+  reasoning: true,
+});
+
+const auto = (spread = 0.5): Config => ({
+  id: 'auto',
+  tag: null,
+  ttft: 1,
+  cost: 1,
+  success: 0.99,
+  cacheRatio: 0.62,
+  spread,
+});
+const pin = (
+  id: string,
+  tag: string,
+  ttft: number,
+  cost: number,
+  cacheRatio: number,
+  success = 0.97,
+): Config => ({ id, tag, ttft, cost, success, cacheRatio, spread: 0.22 });
+
+const MODELS: ModelSpec[] = [
+  {
+    model: 'z-ai/glm-5.3-flash',
+    n: { core: 15, light: 8 },
+    ttft: 1,
+    cost: 1,
+    endpoints: [
+      endpoint('siliconflow', 'SiliconFlow', 0.06, 0.4, 0.012),
+      endpoint('parasail', 'Parasail', 0.08, 0.45, 0.016),
+      endpoint('z-ai', 'Z.AI', 0.1, 0.5, 0.01),
+      endpoint('together', 'Together', 0.12, 0.6, 0.03),
+    ],
+    configs: [
+      auto(0.6),
+      pin('cheapest', 'siliconflow', 1.7, 0.72, 0.9, 0.93),
+      pin('fastest', 'together', 0.42, 1.18, 0.88),
+      pin('best-cache', 'z-ai', 1.05, 0.81, 0.98),
+      pin('alt-host', 'parasail', 0.9, 0.95, 0.94),
+    ],
+    autoProviders: { 'Z.AI': 0.41, Parasail: 0.27, GMICloud: 0.19, SiliconFlow: 0.13 },
+  },
+  {
+    model: 'deepseek/deepseek-v4.1-flash',
+    n: { core: 15, light: 8 },
+    ttft: 1.1,
+    cost: 1.3,
+    endpoints: [
+      endpoint('morph', 'Morph', 0.075, 0.3, 0.0015),
+      endpoint('deepseek', 'DeepSeek', 0.04, 1, 0.01),
+      endpoint('relace', 'Relace', 0.1, 0.5, 0.01),
+      endpoint('deepinfra/fp8', 'DeepInfra', 0.14, 0.42, 0.0042),
+    ],
+    configs: [
+      auto(0.45),
+      pin('cheapest', 'morph', 1.9, 0.78, 0.9, 0.95),
+      pin('fastest', 'relace', 0.88, 1.05, 0.92),
+      pin('best-cache', 'deepseek', 1, 0.83, 0.98),
+      pin('alt-host', 'deepinfra/fp8', 1.35, 0.97, 0.85),
+    ],
+    autoProviders: { DeepSeek: 0.52, Morph: 0.21, Relace: 0.15, DeepInfra: 0.12 },
+  },
+  {
+    model: 'openai/gpt-6-sol',
+    n: { core: 6, light: 4 },
+    ttft: 1.3,
+    cost: 8,
+    endpoints: [
+      endpoint('openai/flex', 'OpenAI', 1, 5, 0.1, 'flex'),
+      endpoint('openai', 'OpenAI', 2, 10, 0.2),
+      endpoint('azure', 'Azure', 2, 10, null),
+      endpoint('openai/fast', 'OpenAI', 4, 20, 0.4, 'priority'),
+    ],
+    configs: [
+      auto(0.3),
+      pin('cheapest', 'openai/flex', 2.6, 0.5, 0.9, 0.9),
+      pin('fastest', 'openai/fast', 0.6, 2, 0.9),
+      pin('default', 'openai', 1, 1, 0.9),
+      pin('alt-host', 'azure', 1.1, 1.02, 0.7),
+    ],
+    autoProviders: { OpenAI: 0.86, Azure: 0.14 },
+  },
+];
+
+const WORKLOADS = [
+  {
+    id: 'short',
+    efforts: ['low', 'medium', 'high'],
+    core: false,
+    ttft: 1400,
+    tps: 70,
+    cost: 0.0004,
+  },
+  { id: 'long', efforts: ['low', 'medium', 'high'], core: false, ttft: 1700, tps: 65, cost: 0.004 },
+  { id: 'agentic', efforts: ['medium'], core: true, ttft: 2400, tps: 55, cost: 0.05 },
+  { id: 'big-context', efforts: ['medium'], core: true, ttft: 3800, tps: 50, cost: 0.012 },
+] as const;
+const EFFORT = {
+  low: { ttft: 0.8, cost: 0.8 },
+  medium: { ttft: 1, cost: 1 },
+  high: { ttft: 1.5, cost: 1.6 },
+};
+
+// Reset by fakeSummary() so every call replays the same sequence from SEED.
+let random = rng(SEED);
+/** Log-normal multiplier with median 1 (Box–Muller). */
+function logNormal(sigma: number) {
+  const u = Math.max(random(), 1e-12);
+  const v = random();
+  return Math.exp(sigma * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v));
+}
+
+/** Synthetic: the CI is a flat ±10% band, not a bootstrap. */
+function stat(values: number[], decimals: number): Stat | null {
+  if (values.length === 0) return null;
+  const sorted = [...values].sort((a, b) => a - b);
+  const p50 = quantile(sorted, 0.5);
+  return {
+    p50: round(p50, decimals),
+    p90: round(quantile(sorted, 0.9), decimals),
+    p95: round(quantile(sorted, 0.95), decimals),
+    ci50: [round(p50 * 0.9, decimals), round(p50 * 1.1, decimals)],
+  };
+}
+function cv(values: number[]) {
+  const mean = values.reduce((sum, v) => sum + v, 0) / values.length;
+  const variance = values.reduce((sum, v) => sum + (v - mean) ** 2, 0) / values.length;
+  return round(Math.sqrt(variance) / mean, 3);
+}
+const band = (ratio: number): [number, number] => [round(ratio * 0.85, 3), round(ratio * 1.15, 3)];
+
+export function fakeSummary(observed: Observed | null): Summary {
+  random = rng(SEED);
+  const cells: Cell[] = [];
+  const samples: Sample[] = [];
+  let clock = 0;
+
+  for (const spec of MODELS) {
+    for (const workload of WORKLOADS) {
+      for (const effort of workload.efforts) {
+        const n = workload.core ? spec.n.core : spec.n.light;
+        const perConfig = spec.configs.map((config) => {
+          const ttft: number[] = [];
+          const total: number[] = [];
+          const tps: number[] = [];
+          const cost: number[] = [];
+          let ok = 0;
+          for (let i = 0; i < n; i++) {
+            clock += 4 + random() * 8;
+            const success = random() < config.success;
+            const t =
+              workload.ttft *
+              EFFORT[effort].ttft *
+              spec.ttft *
+              config.ttft *
+              logNormal(config.spread);
+            const speed = (workload.tps / config.ttft ** 0.3) * logNormal(0.15);
+            const price =
+              workload.cost * EFFORT[effort].cost * spec.cost * config.cost * logNormal(0.1);
+            samples.push({
+              model: spec.model,
+              workload: workload.id,
+              effort,
+              config: config.id,
+              t: round(clock, 1),
+              ttftMs: success ? round(t, 0) : null,
+              outputTps: success ? round(speed, 1) : null,
+              costUsd: success ? round(price, 6) : null,
+              ok: success,
+            });
+            if (!success) continue;
+            ok++;
+            ttft.push(t);
+            tps.push(speed);
+            cost.push(price);
+            total.push(t + (workload.id === 'short' ? 60 : 1500) * (1000 / speed));
+          }
+          return { config, n, ok, ttft, total, tps, cost };
+        });
+
+        const autoRun = perConfig[0]!;
+        for (const run of perConfig) {
+          const { config } = run;
+          const ttftStat = stat(run.ttft, 0);
+          const costStat = stat(run.cost, 6);
+          const autoTtft = stat(autoRun.ttft, 0);
+          const autoCost = stat(autoRun.cost, 6);
+          const isBigContext = workload.id === 'big-context';
+          const cell: Cell = {
+            model: spec.model,
+            workload: workload.id,
+            effort,
+            config: config.id,
+            tag: config.tag,
+            n: run.n,
+            ok: run.ok,
+            truncated: 0,
+            successRate: run.ok / run.n,
+            ttftMs: ttftStat,
+            totalMs: stat(run.total, 0),
+            outputTps: stat(run.tps, 1),
+            costUsd: costStat,
+            cv: run.ok ? { ttftMs: cv(run.ttft), totalMs: cv(run.total) } : null,
+            errors: run.n - run.ok ? { http_429: run.n - run.ok } : {},
+          };
+          if (isBigContext) {
+            cell.cacheRatio = config.cacheRatio;
+            if (costStat)
+              cell.coldVsCached = {
+                coldUsd: round(costStat.p50 * 2.6, 6),
+                cachedUsd: round(costStat.p50 * 0.55, 6),
+              };
+          }
+          if (config.id === 'auto') {
+            cell.providers = spec.autoProviders;
+            if (workload.id === 'agentic') cell.providerSwitchRate = 0.34;
+          } else if (ttftStat && costStat && autoTtft && autoCost) {
+            const ttft = round(ttftStat.p50 / autoTtft.p50, 3);
+            const cost = round(costStat.p50 / autoCost.p50, 3);
+            const stability = round(ttftStat.p95 / ttftStat.p50 / (autoTtft.p95 / autoTtft.p50), 3);
+            const cacheHit = isBigContext ? round(config.cacheRatio / 0.62, 3) : null;
+            cell.vsAuto = {
+              ttft,
+              cost,
+              stability,
+              cacheHit,
+              ci: {
+                ttft: band(ttft),
+                cost: band(cost),
+                stability: band(stability),
+                cacheHit: cacheHit === null ? null : band(cacheHit),
+              },
+            };
+          } else {
+            cell.vsAuto = null;
+          }
+          cells.push(cell);
+        }
+      }
+    }
+  }
+
+  const headlines: Headline[] = [];
+  const pick = (metric: Headline['metric'], config: string, workload: string) => {
+    for (const cell of cells) {
+      if (cell.config !== config || cell.workload !== workload || cell.effort !== 'medium')
+        continue;
+      const vs = cell.vsAuto;
+      const autoCell = cells.find(
+        (c) =>
+          c.model === cell.model &&
+          c.workload === workload &&
+          c.effort === 'medium' &&
+          c.config === 'auto',
+      );
+      if (!vs || !autoCell) continue;
+      const ratio = vs[metric];
+      const ci = vs.ci[metric];
+      if (ratio === null || ci === null || (ci[0] <= 1 && ci[1] >= 1)) continue;
+      const value =
+        metric === 'cost' ? cell.costUsd!.p50 : metric === 'ttft' ? cell.ttftMs!.p50 : ratio;
+      const baseline =
+        metric === 'cost' ? autoCell.costUsd!.p50 : metric === 'ttft' ? autoCell.ttftMs!.p50 : 1;
+      headlines.push({
+        metric,
+        model: cell.model,
+        config,
+        workload,
+        effort: 'medium',
+        value,
+        baseline,
+        ratio,
+        ci,
+        n: cell.ok,
+      });
+    }
+  };
+  pick('cost', 'cheapest', 'agentic');
+  pick('ttft', 'fastest', 'short');
+  pick('cacheHit', 'best-cache', 'big-context');
+
+  const endpoints: EndpointSnapshot[] = MODELS.flatMap((spec) =>
+    spec.endpoints.map((e) => ({ model: spec.model, ...e })),
+  );
+  const costModel: CostModel[] = MODELS.flatMap((spec) =>
+    spec.configs.map((config) => {
+      // Auto has no single price: use the mean of the endpoints it may route to.
+      const pool = config.tag ? spec.endpoints.filter((e) => e.tag === config.tag) : spec.endpoints;
+      const mean = (field: (e: (typeof pool)[number]) => number | null) => {
+        const values = pool.map(field).filter((v): v is number => v !== null);
+        return values.length ? round(values.reduce((s, v) => s + v, 0) / values.length, 6) : null;
+      };
+      return {
+        model: spec.model,
+        config: config.id,
+        inputPerM: mean((e) => e.input) ?? 0,
+        outputPerM: mean((e) => e.output) ?? 0,
+        cachedPerM: mean((e) => e.cached),
+      };
+    }),
+  );
+
+  const profiles: Profile[] = [
+    {
+      id: 'chat',
+      label: 'Chat',
+      source: 'bench',
+      shares: { input: 0.55, cachedInput: 0.25, output: 0.15, reasoning: 0.05 },
+      n: 0,
+    },
+    {
+      id: 'long-generation',
+      label: 'Long generation',
+      source: 'bench',
+      shares: { input: 0.12, cachedInput: 0.03, output: 0.6, reasoning: 0.25 },
+      n: 0,
+    },
+  ];
+  if (observed) profiles.unshift(profileFromObserved(observed));
+
+  return Summary.parse({
+    version: 1,
+    run: {
+      id: 'synthetic',
+      date: '2026-09-25T00:00:00.000Z',
+      commit: 'synthetic',
+      seed: SEED,
+      maxUsd: 5,
+      spentUsd: 0,
+      synthetic: true,
+    },
+    headlines,
+    cells,
+    endpoints,
+    costModel,
+    profiles,
+    samples,
+    observed,
+  });
+}
+
+if (import.meta.main) {
+  const summary = fakeSummary(latestObserved());
+  const dir = path.join(import.meta.dirname, 'results');
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, 'summary.fake.json');
+  writeFileSync(file, `${JSON.stringify(summary, null, 2)}\n`);
+  console.log(
+    `synthetic summary · ${summary.cells.length} cells · ${summary.samples.length} samples → ${path.relative(process.cwd(), file)}`,
+  );
+}
+
+// file: packages/bench/observe.ts
+/**
+ * Exports real-world OpenRouter usage for one app (SPEC §11.9, §12): per model × provider
+ * aggregates from `POST /analytics/query`, written to `observed/<to>.json`.
+ *
+ *   OPENROUTER_MANAGEMENT_KEY=… node observe.ts [--days 30] [--app OpenCode | --app-id 123]
+ *                                               [--exclude <model slug>]…
+ *
+ * Analytics needs a management key (an inference key gets 403). Resolving the app id by name
+ * also needs `OPENROUTER_API_KEY`, because only `/generation` maps a generation to its app.
+ */
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { parseArgs } from 'node:util';
+import { z } from 'zod';
+import { Observed, type ObservedRow } from './schema.ts';
+
+const API = 'https://openrouter.ai/api/v1';
+/** Percentile metrics refuse longer ranges. */
+export const MAX_DAYS = 31;
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+// `cache_capture_rate` and `possible_*` can't be combined with cost, latency or the app filter.
+const METRICS = [
+  'request_count',
+  'tokens_prompt',
+  'cached_tokens',
+  'tokens_completion',
+  'reasoning_tokens',
+  'p50_total_time_to_first_token',
+  'p95_total_time_to_first_token',
+  'p50_throughput',
+  'cache_hit_rate',
+] as const;
+const ROW_LIMIT = 500;
+
+type Fetch = typeof fetch;
+export type Period = { from: string; to: string };
+
+/** The last `days` full UTC days; `to` is today at 00:00 UTC and is exclusive. */
+export function period(days: number, now = new Date()): Period {
+  if (!Number.isInteger(days) || days < 1 || days > MAX_DAYS)
+    throw new Error(`--days must be an integer between 1 and ${MAX_DAYS}`);
+  const to = Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate());
+  return { from: isoDate(to - days * DAY_MS), to: isoDate(to) };
+}
+
+export function buildQuery(appId: number, { from, to }: Period) {
+  return {
+    metrics: [...METRICS],
+    dimensions: ['model', 'provider'],
+    // The app filter takes the numeric id; the display name returns a 500.
+    filters: [{ field: 'app', operator: 'eq', value: appId }],
+    time_range: { start: `${from}T00:00:00Z`, end: `${to}T00:00:00Z` },
+    order_by: { field: 'request_count', direction: 'desc' },
+    limit: ROW_LIMIT,
+  };
+}
+
+// Counts come back as strings ("4139"), rates and latencies as numbers.
+const Num = z.union([
+  z.number(),
+  z
+    .string()
+    .regex(/^-?\d+(\.\d+)?$/)
+    .transform(Number),
+]);
+const OptionalNum = Num.nullish().transform((value) => value ?? null);
+
+const AnalyticsRow = z.object({
+  model: z.string(),
+  provider: z.string().nullish(),
+  request_count: Num,
+  tokens_prompt: Num,
+  cached_tokens: OptionalNum,
+  tokens_completion: Num,
+  reasoning_tokens: OptionalNum,
+  p50_total_time_to_first_token: OptionalNum,
+  p95_total_time_to_first_token: OptionalNum,
+  p50_throughput: OptionalNum,
+  cache_hit_rate: OptionalNum,
+});
+
+const AnalyticsResponse = z.object({
+  data: z.object({
+    data: z.array(z.unknown()),
+    metadata: z.object({ truncated: z.boolean() }).loose(),
+  }),
+});
+
+/** Strips the release date OpenRouter appends to permaslugs: `…-flash-20260910` → `…-flash`. */
+export function baseSlug(permaslug: string) {
+  return permaslug.replace(/-\d{8}$/, '');
+}
+
+/** Rounds a latency to the ms, a throughput to 0.1 tok/s and a rate to 4 decimals. */
+function round(value: number | null, decimals: number) {
+  if (value === null) return null;
+  const factor = 10 ** decimals;
+  return Math.round(value * factor) / factor;
+}
+
+/**
+ * Maps analytics rows to the whitelisted `ObservedRow` fields. Rows without a provider are
+ * dropped: they can't be pinned, so they say nothing about choosing an endpoint. `exclude`
+ * holds model slugs (with or without date) to leave out of a published export.
+ */
+export function toRows(json: unknown, exclude: ReadonlySet<string> = new Set()): ObservedRow[] {
+  const { data } = AnalyticsResponse.parse(json);
+  if (data.metadata.truncated)
+    throw new Error(`Analytics returned more than ${ROW_LIMIT} rows; shorten --days`);
+  return data.data.flatMap((raw) => {
+    const row = AnalyticsRow.parse(raw);
+    if (!row.provider || exclude.has(row.model) || exclude.has(baseSlug(row.model))) return [];
+    return [
+      {
+        model: baseSlug(row.model),
+        permaslug: row.model,
+        provider: row.provider,
+        requests: row.request_count,
+        promptTokens: row.tokens_prompt,
+        cachedTokens: row.cached_tokens ?? 0,
+        completionTokens: row.tokens_completion,
+        reasoningTokens: row.reasoning_tokens ?? 0,
+        ttftP50Ms: round(row.p50_total_time_to_first_token, 0),
+        ttftP95Ms: round(row.p95_total_time_to_first_token, 0),
+        tpsP50: round(row.p50_throughput, 1),
+        cacheHitRate: round(row.cache_hit_rate, 4),
+      },
+    ];
+  });
+}
+
+/**
+ * Finds the numeric app id from its display name: analytics lists generation ids per app,
+ * and `/generation` returns the `app_id` of one of them.
+ */
+export async function resolveAppId(
+  name: string,
+  keys: { management: string; api: string | undefined },
+  fetchImpl: Fetch = fetch,
+  now = new Date(),
+): Promise<number> {
+  if (!keys.api) throw new Error('Resolving --app needs OPENROUTER_API_KEY; or pass --app-id');
+  const json = await post(
+    '/analytics/query',
+    {
+      metrics: ['request_count'],
+      dimensions: ['app', 'generation_id'],
+      time_range: {
+        start: new Date(now.getTime() - 7 * DAY_MS).toISOString(),
+        end: now.toISOString(),
+      },
+      limit: 100,
+    },
+    keys.management,
+    fetchImpl,
+  );
+  const rows = z
+    .object({
+      data: z.object({
+        data: z.array(z.object({ app: z.string().nullish(), generation_id: z.string() })),
+      }),
+    })
+    .parse(json).data.data;
+  const generation = rows.find((row) => row.app === name)?.generation_id;
+  if (!generation) throw new Error(`No recent generation from app "${name}"; pass --app-id`);
+
+  const response = await fetchImpl(`${API}/generation?id=${encodeURIComponent(generation)}`, {
+    headers: { authorization: `Bearer ${keys.api}` },
+  });
+  await assertOk(response, '/generation');
+  const { data } = z
+    .object({ data: z.object({ app_id: z.number().int() }) })
+    .parse(await response.json());
+  return data.app_id;
+}
+
+export async function exportObserved(
+  appId: number,
+  range: Period,
+  managementKey: string,
+  fetchImpl: Fetch = fetch,
+  now = new Date(),
+  exclude: ReadonlySet<string> = new Set(),
+): Promise<Observed> {
+  const json = await post('/analytics/query', buildQuery(appId, range), managementKey, fetchImpl);
+  return Observed.parse({
+    period: range,
+    exportedAt: now.toISOString(),
+    rows: toRows(json, exclude),
+  });
+}
+
+async function post(route: string, body: unknown, key: string, fetchImpl: Fetch) {
+  const response = await fetchImpl(`${API}${route}`, {
+    method: 'POST',
+    headers: { authorization: `Bearer ${key}`, 'content-type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  await assertOk(response, route);
+  return response.json();
+}
+
+async function assertOk(response: Response, route: string) {
+  if (response.ok) return;
+  const detail = await response.text().catch(() => '');
+  throw new Error(
+    `OpenRouter ${response.status} (${route})${detail ? `: ${detail.slice(0, 200)}` : ''}`,
+  );
+}
+
+/** The newest `observed/*.json` export, or null when there is none. */
+export function latestObserved(dir = path.join(import.meta.dirname, 'observed')): Observed | null {
+  const latest = readdirSync(dir)
+    .filter((file) => file.endsWith('.json'))
+    .sort()
+    .at(-1);
+  if (!latest) return null;
+  return Observed.parse(JSON.parse(readFileSync(path.join(dir, latest), 'utf8')));
+}
+
+function isoDate(ms: number) {
+  return new Date(ms).toISOString().slice(0, 10);
+}
+
+async function main() {
+  const { values } = parseArgs({
+    options: {
+      days: { type: 'string', default: '30' },
+      app: { type: 'string', default: 'OpenCode' },
+      'app-id': { type: 'string' },
+      exclude: { type: 'string', multiple: true, default: [] },
+    },
+  });
+  const management = process.env.OPENROUTER_MANAGEMENT_KEY;
+  if (!management)
+    throw new Error('OPENROUTER_MANAGEMENT_KEY is required (analytics rejects inference keys)');
+
+  const range = period(Number(values.days));
+  const appId = values['app-id']
+    ? Number(values['app-id'])
+    : await resolveAppId(values.app, { management, api: process.env.OPENROUTER_API_KEY });
+  if (!Number.isInteger(appId)) throw new Error('--app-id must be an integer');
+
+  const observed = await exportObserved(
+    appId,
+    range,
+    management,
+    fetch,
+    new Date(),
+    new Set(values.exclude),
+  );
+  const dir = path.join(import.meta.dirname, 'observed');
+  mkdirSync(dir, { recursive: true });
+  const file = path.join(dir, `${range.to}.json`);
+  writeFileSync(file, `${JSON.stringify(observed, null, 2)}\n`);
+
+  const requests = observed.rows.reduce((sum, row) => sum + row.requests, 0);
+  console.log(
+    `${observed.rows.length} rows · ${requests.toLocaleString('en-US')} requests · ${range.from} → ${range.to} → ${path.relative(process.cwd(), file)}`,
+  );
+}
+
+if (import.meta.main) {
+  main().catch((error: unknown) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}
+
+// file: packages/bench/plan.ts
+import type { Endpoint } from 'opencode-openrouter-provider-manager/rpc';
+import {
+  type Effort,
+  EXPECTED_REASONING,
+  MAX_TOKENS,
+  SERIES_LENGTH,
+  type Workload,
+} from './config.ts';
+import { rng } from './stats.ts';
+import type { Config } from './strategies.ts';
+import { SPECS } from './workloads/index.ts';
+
+/**
+ * Scheduling and budget (SPEC §8): the units of a run in a seeded interleaved order, their
+ * estimated and worst-case cost, and the reservation that keeps `--max-usd` a hard cap.
+ */
+
+/** One model × config × workload × effort. `n` counts requests, tasks for agentic. */
+export type Cell = { model: string; config: Config; workload: Workload; effort: Effort; n: number };
+
+/** What the runner executes at once: a request, an agentic task, or a big-context series. */
+export type Unit = {
+  /** Stable across runs of the same plan: `--resume` skips the keys already written. */
+  key: string;
+  model: string;
+  config: Config;
+  workload: Workload;
+  effort: Effort;
+  /** Index among the measured units of the cell; the warm-up is -1. */
+  iteration: number;
+  warmup: boolean;
+};
+
+export function cellKey(cell: Omit<Cell, 'n'>) {
+  return [cell.model, cell.config.tag ?? 'auto', cell.workload, cell.effort].join('|');
+}
+
+/** Big-context runs whole series; the other workloads one unit per repetition. */
+export function unitsOf(workload: Workload, n: number) {
+  return workload === 'big-context' ? Math.ceil(n / SERIES_LENGTH) : n;
+}
+
+/**
+ * Every unit of `cells`, round-robin: each round takes the next unit of every cell, in an order
+ * shuffled by `seed`. A cell starts with its warm-up, except big-context (its first call is the
+ * cold one it measures).
+ */
+export function buildPlan(cells: Cell[], seed: number): Unit[] {
+  const queues = cells.map((cell) => {
+    const units: Unit[] = [];
+    const base = { model: cell.model, config: cell.config, workload: cell.workload };
+    const key = cellKey(cell);
+    if (cell.workload !== 'big-context')
+      units.push({
+        ...base,
+        effort: cell.effort,
+        key: `${key}|warmup`,
+        iteration: -1,
+        warmup: true,
+      });
+    for (let i = 0; i < unitsOf(cell.workload, cell.n); i++)
+      units.push({ ...base, effort: cell.effort, key: `${key}|${i}`, iteration: i, warmup: false });
+    return units;
+  });
+  const random = rng(seed);
+  const plan: Unit[] = [];
+  const rounds = Math.max(0, ...queues.map((q) => q.length));
+  for (let round = 0; round < rounds; round++) {
+    const batch = queues.flatMap((queue) => (round < queue.length ? [queue[round]!] : []));
+    // Fisher–Yates
+    for (let i = batch.length - 1; i > 0; i--) {
+      const j = Math.floor(random() * (i + 1));
+      [batch[i], batch[j]] = [batch[j]!, batch[i]!];
+    }
+    plan.push(...batch);
+  }
+  return plan;
+}
+
+type Prices = { input: number; output: number; cached: number };
+
+const perToken = (endpoint: Endpoint): Prices | null =>
+  endpoint.input === null || endpoint.output === null
+    ? null
+    : {
+        input: endpoint.input / 1e6,
+        output: endpoint.output / 1e6,
+        cached: (endpoint.cached ?? endpoint.input) / 1e6,
+      };
+
+/** The priced endpoints a unit may be served by: its pin, or any endpoint for auto. */
+function candidates(unit: Pick<Unit, 'config'>, endpoints: Endpoint[]): Prices[] {
+  return endpoints
+    .filter((e) => e.tag !== 'router' && (unit.config.tag === null || e.tag === unit.config.tag))
+    .map(perToken)
+    .filter((p): p is Prices => p !== null);
+}
+
+const maxTokensOf = (unit: Pick<Unit, 'workload' | 'effort'>) => {
+  const value = MAX_TOKENS[unit.workload][unit.effort];
+  if (value === undefined) throw new Error(`${unit.workload} is not measured at ${unit.effort}`);
+  return value;
+};
+
+/**
+ * Expected USD of one unit, from the workload's expected tokens plus the reasoning expected at
+ * its effort. Auto is priced at the mean of its endpoints.
+ */
+export function estimate(
+  unit: Pick<Unit, 'config' | 'workload' | 'effort'>,
+  endpoints: Endpoint[],
+) {
+  const pool = candidates(unit, endpoints);
+  if (pool.length === 0) return null;
+  const maxTokens = maxTokensOf(unit);
+  const output = (visible: number) =>
+    Math.min(maxTokens, visible + EXPECTED_REASONING[unit.effort]);
+  const cost = (p: Prices) =>
+    SPECS[unit.workload].expected.reduce(
+      (sum, t) =>
+        sum +
+        (t.input - t.cachedInput) * p.input +
+        t.cachedInput * p.cached +
+        output(t.output) * p.output,
+      0,
+    );
+  return pool.reduce((sum, p) => sum + cost(p), 0) / pool.length;
+}
+
+/**
+ * Worst-case USD of one unit (SPEC §8): for each request, its input bound at the highest input
+ * price plus `max_tokens` at the highest output price among the endpoints the config may use.
+ */
+export function reserve(unit: Pick<Unit, 'config' | 'workload' | 'effort'>, endpoints: Endpoint[]) {
+  const pool = candidates(unit, endpoints);
+  if (pool.length === 0) return null;
+  const input = Math.max(...pool.map((p) => p.input));
+  const output = Math.max(...pool.map((p) => p.output));
+  const maxTokens = maxTokensOf(unit);
+  return SPECS[unit.workload]
+    .worstInput(maxTokens)
+    .reduce((sum, tokens) => sum + tokens * input + maxTokens * output, 0);
+}
+
+export type Reservation = { readonly usd: number };
+
+/** Reserve before sending, settle with the real cost after (SPEC §8). */
+export class Budget {
+  readonly maxUsd: number;
+  spent: number;
+  reserved = 0;
+
+  constructor(maxUsd: number, spent = 0) {
+    this.maxUsd = maxUsd;
+    this.spent = spent;
+  }
+
+  /** null when the reservation would take spent + in-flight reservations over the cap. */
+  tryReserve(usd: number): Reservation | null {
+    if (this.spent + this.reserved + usd > this.maxUsd) return null;
+    this.reserved += usd;
+    return { usd };
+  }
+
+  /** Replaces the reservation by the real cost; an unknown cost keeps the reservation. */
+  settle(reservation: Reservation, costUsd: number | null) {
+    this.reserved -= reservation.usd;
+    this.spent += costUsd ?? reservation.usd;
+  }
+}
+
+// file: packages/bench/profiles.ts
+import type { Observed, Profile } from './schema.ts';
+
+/**
+ * Token mix of real usage, from an observed export (SPEC §11.3, §11.9). In OpenRouter usage,
+ * cached tokens are part of the prompt tokens and reasoning tokens part of the completion
+ * tokens, so both are split out to keep the four shares disjoint.
+ */
+export function profileFromObserved(
+  observed: Observed,
+  { id = 'coding-agent', label = 'Coding agent' } = {},
+): Profile {
+  let prompt = 0;
+  let cached = 0;
+  let completion = 0;
+  let reasoning = 0;
+  let requests = 0;
+  for (const row of observed.rows) {
+    prompt += row.promptTokens;
+    cached += Math.min(row.cachedTokens, row.promptTokens);
+    completion += row.completionTokens;
+    reasoning += Math.min(row.reasoningTokens, row.completionTokens);
+    requests += row.requests;
+  }
+  const total = prompt + completion;
+  if (total === 0) throw new Error('The observed export has no tokens');
+  return {
+    id,
+    label,
+    source: 'openrouter-observed',
+    shares: {
+      input: (prompt - cached) / total,
+      cachedInput: cached / total,
+      output: (completion - reasoning) / total,
+      reasoning: reasoning / total,
+    },
+    n: requests,
+    period: observed.period,
+  };
+}
+
+// file: packages/bench/report.ts
+/**
+ * Writes `results/<runId>.md`, a Markdown report to review a run without the site (SPEC §9):
+ * resolved configurations, cell statistics, ratios to auto, headlines, and the gap between the
+ * cost computed from listed prices and `usage.cost` (SPEC §12: discounts already included?).
+ *
+ *   node report.ts [runId]
+ */
+import { readdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import {
+  latestRunId,
+  readLines,
+  readMeta,
+  type ResultLine,
+  RESULTS_DIR,
+  type RunMeta,
+} from './results.ts';
+import type { Stat, Summary } from './schema.ts';
+import { summarize } from './summarize.ts';
+
+const row = (cells: (string | number)[]) => `| ${cells.join(' | ')} |`;
+const table = (head: string[], rows: (string | number)[][]) =>
+  [row(head), row(head.map(() => '---')), ...rows.map(row)].join('\n');
+
+const ms = (s: Stat | null) => (s ? `${s.p50} / ${s.p90} / ${s.p95}` : '—');
+const ci = (value: number | null | undefined, interval: [number, number] | null | undefined) =>
+  value == null || !interval ? '—' : `${value} [${interval[0]}, ${interval[1]}]`;
+
+/** Listed-price cost of the pinned lines against `usage.cost`, per model × tag. */
+export function costCheck(meta: RunMeta, lines: ResultLine[]) {
+  const pinned = lines.filter(
+    (l) =>
+      l.tag !== null &&
+      l.costUsd !== null &&
+      l.promptTokens !== null &&
+      l.completionTokens !== null,
+  );
+  const groups = Map.groupBy(pinned, (l) => `${l.model}|${l.tag}`);
+  return [...groups.values()].flatMap((group) => {
+    const { model, tag } = group[0]!;
+    const e = meta.endpoints.find((x) => x.model === model && x.tag === tag);
+    if (!e || e.input === null || e.output === null) return [];
+    let listed = 0;
+    let actual = 0;
+    for (const l of group) {
+      const cached = l.cachedTokens ?? 0;
+      listed +=
+        ((l.promptTokens! - cached) * e.input +
+          cached * (e.cached ?? e.input) +
+          l.completionTokens! * e.output) /
+        1e6;
+      actual += l.costUsd!;
+    }
+    return [{ model, tag: tag!, requests: group.length, listed, actual, gap: actual / listed - 1 }];
+  });
+}
+
+export function report(
+  meta: RunMeta,
+  lines: ResultLine[],
+  summary: Summary = summarize(meta, lines),
+) {
+  const { run } = summary;
+  const out = [
+    `# Benchmark run ${run.id}`,
+    '',
+    `${run.date} · commit \`${run.commit.slice(0, 12)}\` · seed ${run.seed} · ` +
+      `spent $${run.spentUsd.toFixed(4)} of $${run.maxUsd} · ${lines.length} requests`,
+    '',
+    '## Configurations',
+    '',
+  ];
+  for (const m of meta.models) {
+    out.push(`- **${m.model}** (${m.class}, cost basis: ${m.costBasis})`);
+    for (const c of m.configs) {
+      const observed = c.fromObserved.length > 0 ? ` (observed: ${c.fromObserved.join(', ')})` : '';
+      out.push(`  - ${c.ids.join(' + ')} → \`${c.tag ?? 'auto'}\`${observed}`);
+    }
+    for (const o of m.omitted) out.push(`  - ~~${o.id}~~: ${o.reason}`);
+  }
+
+  out.push(
+    '',
+    '## Cells',
+    '',
+    'Latencies in ms (p50 / p90 / p95), successes only; cost in USD per request (per task for agentic).',
+    '',
+    table(
+      [
+        'model',
+        'workload',
+        'effort',
+        'config',
+        'n',
+        'ok',
+        'errors',
+        'TTFT',
+        'total',
+        'tok/s p50',
+        'cost p50',
+        'cache',
+      ],
+      summary.cells.map((c) => [
+        c.model,
+        c.workload,
+        c.effort,
+        c.config,
+        c.n,
+        c.ok,
+        Object.entries(c.errors)
+          .map(([k, v]) => `${k} ${v}`)
+          .join(', ') || '—',
+        ms(c.ttftMs),
+        ms(c.totalMs),
+        c.outputTps?.p50 ?? '—',
+        c.costUsd?.p50 ?? '—',
+        c.cacheRatio ?? '—',
+      ]),
+    ),
+    '',
+    '## Versus auto',
+    '',
+    'Ratio pinned / auto with its 95% bootstrap interval; below 1 is cheaper, faster or steadier.',
+    '',
+    table(
+      ['model', 'workload', 'effort', 'config', 'TTFT', 'cost', 'stability', 'cache hit'],
+      summary.cells
+        .filter((c) => c.tag !== null)
+        .map((c) => [
+          c.model,
+          c.workload,
+          c.effort,
+          c.config,
+          ci(c.vsAuto?.ttft, c.vsAuto?.ci.ttft),
+          ci(c.vsAuto?.cost, c.vsAuto?.ci.cost),
+          ci(c.vsAuto?.stability, c.vsAuto?.ci.stability),
+          ci(c.vsAuto?.cacheHit, c.vsAuto?.ci.cacheHit),
+        ]),
+    ),
+    '',
+    '## Headlines',
+    '',
+    summary.headlines.length === 0
+      ? 'None: no interval excludes 1.'
+      : table(
+          ['metric', 'model', 'config', 'workload', 'effort', 'value', 'auto', 'ratio', 'n'],
+          summary.headlines.map((h) => [
+            h.metric,
+            h.model,
+            h.config,
+            h.workload,
+            h.effort,
+            h.value,
+            h.baseline,
+            ci(h.ratio, h.ci),
+            h.n,
+          ]),
+        ),
+    '',
+    '## Cost check',
+    '',
+    'Cost from listed prices against `usage.cost`, pinned requests only (auto may use any host).',
+    '',
+    table(
+      ['model', 'tag', 'requests', 'listed', 'usage.cost', 'gap'],
+      costCheck(meta, lines).map((c) => [
+        c.model,
+        c.tag,
+        c.requests,
+        `$${c.listed.toFixed(6)}`,
+        `$${c.actual.toFixed(6)}`,
+        `${(c.gap * 100).toFixed(2)}%`,
+      ]),
+    ),
+    '',
+  );
+  return out.join('\n');
+}
+
+if (import.meta.main) {
+  try {
+    const runId = process.argv[2] ?? latestRunId(readdirSync(RESULTS_DIR));
+    if (!runId) throw new Error(`No run in ${RESULTS_DIR}`);
+    const file = path.join(RESULTS_DIR, `${runId}.md`);
+    writeFileSync(file, report(readMeta(runId), readLines(runId)));
+    console.log(`report → ${path.relative(process.cwd(), file)}`);
+  } catch (error) {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  }
+}
+
+// file: packages/bench/results.ts
+import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import { z } from 'zod';
+import { EFFORTS, WORKLOADS } from './config.ts';
+import { EndpointSnapshot, Observed } from './schema.ts';
+import { STRATEGIES } from './strategies.ts';
+
+/**
+ * Raw run files (SPEC §7, §8): `results/<runId>.meta.json` describes the run, and
+ * `results/<runId>.jsonl` holds one line per request. Metrics only: no response text, no key.
+ */
+
+export const RESULTS_DIR = path.join(import.meta.dirname, 'results');
+
+const Strategy = z.enum(STRATEGIES);
+const Nullable = z.number().nullable();
+
+export const ResultLine = z.strictObject({
+  runId: z.string(),
+  /** The unit key; several lines share it for agentic tasks and big-context series. */
+  key: z.string(),
+  model: z.string(),
+  /** Every strategy the configuration stands for (merged configs have several). */
+  configs: z.array(Strategy).min(1),
+  tag: z.string().nullable(),
+  workload: z.enum(WORKLOADS),
+  effort: z.enum(EFFORTS),
+  /** Index of the unit in its cell; -1 for the warm-up. */
+  iteration: z.number().int(),
+  warmup: z.boolean(),
+  /** Agentic: turn within the task. */
+  turn: z.number().int().nonnegative().optional(),
+  /** Big-context: request within the series; 0 is the cold call. */
+  position: z.number().int().nonnegative().optional(),
+  startedAt: z.iso.datetime(),
+  status: z.enum([
+    'ok',
+    'truncated',
+    'http_4xx',
+    'http_429',
+    'http_5xx',
+    'timeout',
+    'stream_error',
+  ]),
+  error: z.strictObject({ code: Nullable, message: z.string() }).nullable(),
+  finishReason: z.string().nullable(),
+  ttftMs: Nullable,
+  ttfvtMs: Nullable,
+  totalMs: z.number(),
+  outputTps: Nullable,
+  promptTokens: Nullable,
+  completionTokens: Nullable,
+  reasoningTokens: Nullable,
+  cachedTokens: Nullable,
+  costUsd: Nullable,
+  /** Number of tool calls in the response; their arguments are not kept. */
+  toolCalls: z.number().int().nonnegative(),
+  /** From `/generation`: the provider that served the request, and its server-side timings. */
+  providerUsed: z.string().nullable(),
+  serverLatencyMs: Nullable,
+  generationTimeMs: Nullable,
+});
+export type ResultLine = z.infer<typeof ResultLine>;
+
+export const ResolvedModel = z.strictObject({
+  model: z.string(),
+  class: z.enum(['open-weight', 'premium']),
+  configs: z.array(
+    z.strictObject({
+      ids: z.array(Strategy).min(1),
+      tag: z.string().nullable(),
+      fromObserved: z.array(Strategy),
+    }),
+  ),
+  omitted: z.array(z.strictObject({ id: Strategy, reason: z.string() })),
+  costBasis: z.enum(['profile', 'input']),
+});
+export type ResolvedModel = z.infer<typeof ResolvedModel>;
+
+export const RunMeta = z.strictObject({
+  runId: z.string(),
+  date: z.iso.datetime(),
+  commit: z.string(),
+  seed: z.number().int(),
+  args: z.strictObject({
+    maxUsd: z.number().positive(),
+    workloads: z.array(z.enum(WORKLOADS)),
+    efforts: z.array(z.enum(EFFORTS)),
+    /** Repetitions override; null keeps `REPETITIONS`. */
+    n: z.number().int().positive().nullable(),
+    concurrency: z.number().int().positive(),
+  }),
+  models: z.array(ResolvedModel),
+  endpoints: z.array(EndpointSnapshot),
+  observed: Observed.nullable(),
+});
+export type RunMeta = z.infer<typeof RunMeta>;
+
+export const metaFile = (runId: string, dir = RESULTS_DIR) => path.join(dir, `${runId}.meta.json`);
+export const linesFile = (runId: string, dir = RESULTS_DIR) => path.join(dir, `${runId}.jsonl`);
+
+export function writeMeta(meta: RunMeta, dir = RESULTS_DIR) {
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(metaFile(meta.runId, dir), `${JSON.stringify(RunMeta.parse(meta), null, 2)}\n`);
+}
+
+export function readMeta(runId: string, dir = RESULTS_DIR): RunMeta {
+  const file = metaFile(runId, dir);
+  if (!existsSync(file)) throw new Error(`No run ${runId}: ${file} is missing`);
+  return RunMeta.parse(JSON.parse(readFileSync(file, 'utf8')));
+}
+
+export function readLines(runId: string, dir = RESULTS_DIR): ResultLine[] {
+  const file = linesFile(runId, dir);
+  if (!existsSync(file)) return [];
+  return readFileSync(file, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => ResultLine.parse(JSON.parse(line)));
+}
+
+/** Appends the lines of one finished unit at once, so an interrupted unit leaves nothing. */
+export function appendLines(runId: string, lines: ResultLine[], dir = RESULTS_DIR) {
+  if (lines.length === 0) return;
+  appendFileSync(linesFile(runId, dir), lines.map((line) => `${JSON.stringify(line)}\n`).join(''));
+}
+
+/** The newest run id with a meta file. */
+export function latestRunId(ids: string[]): string | null {
+  return (
+    ids
+      .filter((file) => file.endsWith('.meta.json'))
+      .map((file) => file.slice(0, -'.meta.json'.length))
+      .sort()
+      .at(-1) ?? null
+  );
+}
+
+// file: packages/bench/run.ts
+/**
+ * Runs the benchmark (SPEC §8, §12): resolves the configurations of every model, plans the
+ * units in a seeded interleaved order, and sends them under a hard budget, appending metrics to
+ * `results/<runId>.jsonl`. `--dry-run` only lists endpoints (free) and prints the estimate.
+ *
+ *   node run.ts --dry-run
+ *   OPENROUTER_API_KEY=… node run.ts [--max-usd 5] [--models a/b,c/d] [--workloads short,long]
+ *                                     [--efforts low,medium] [--n 4] [--seed 1] [--concurrency 1]
+ *   OPENROUTER_API_KEY=… node run.ts --resume <runId> [--max-usd 5]
+ */
+import { execFileSync } from 'node:child_process';
+import { parseArgs } from 'node:util';
+import { fetchEndpoints } from 'opencode-openrouter-provider-manager/openrouter';
+import type { Endpoint } from 'opencode-openrouter-provider-manager/rpc';
+import {
+  type Generation,
+  fetchGeneration,
+  type RequestMetrics,
+  send,
+  type ToolCall,
+} from './client.ts';
+import {
+  DEFAULT_MAX_USD,
+  type Effort,
+  effortsOf,
+  EFFORTS,
+  MAX_AGENTIC_TURNS,
+  MAX_TOKENS,
+  type ModelClass,
+  MODELS,
+  REPETITIONS,
+  SERIES_LENGTH,
+  type Workload,
+  WORKLOADS,
+} from './config.ts';
+import { latestObserved } from './observe.ts';
+import { Budget, buildPlan, type Cell, cellKey, estimate, reserve, type Unit } from './plan.ts';
+import { profileFromObserved } from './profiles.ts';
+import {
+  appendLines,
+  readLines,
+  readMeta,
+  type ResolvedModel,
+  type ResultLine,
+  RESULTS_DIR,
+  type RunMeta,
+  writeMeta,
+} from './results.ts';
+import type { EndpointSnapshot, Observed } from './schema.ts';
+import { round } from './stats.ts';
+import { buildBody, resolveConfigs } from './strategies.ts';
+import { agentic, bigContext, type Message, requestBody, long, short } from './workloads/index.ts';
+
+export type Options = {
+  models: { id: string; class: ModelClass }[];
+  workloads: Workload[];
+  efforts: Effort[];
+  /** Repetitions override; null keeps `REPETITIONS`. */
+  n: number | null;
+  seed: number;
+  maxUsd: number;
+  concurrency: number;
+};
+
+/** Resolves the configurations of every model from a fresh endpoint listing (free). */
+export async function resolveModels(
+  models: Options['models'],
+  listEndpoints: (model: string) => Promise<Endpoint[]>,
+  observed: Observed | null,
+): Promise<{ models: ResolvedModel[]; endpoints: EndpointSnapshot[] }> {
+  const profile = observed ? profileFromObserved(observed) : null;
+  const resolved: ResolvedModel[] = [];
+  const endpoints: EndpointSnapshot[] = [];
+  for (const { id, class: modelClass } of models) {
+    // oxlint-disable-next-line no-await-in-loop -- a few models, listed one after the other
+    const listing = await listEndpoints(id);
+    if (listing.length === 0) throw new Error(`No endpoints for ${id}: check the model slug`);
+    endpoints.push(...listing.map((e) => ({ model: id, ...e })));
+    resolved.push({
+      model: id,
+      class: modelClass,
+      ...resolveConfigs(id, listing, observed, profile),
+    });
+  }
+  return { models: resolved, endpoints };
+}
+
+/** Every measured cell: model × workload × effort × config. */
+export function cellsOf(
+  models: ResolvedModel[],
+  { workloads, efforts, n }: Pick<Options, 'workloads' | 'efforts' | 'n'>,
+): Cell[] {
+  return models.flatMap((m) =>
+    workloads.flatMap((workload) =>
+      effortsOf(workload)
+        .filter((effort) => efforts.includes(effort))
+        .flatMap((effort) =>
+          m.configs.map((config) => ({
+            model: m.model,
+            config,
+            workload,
+            effort,
+            n: n ?? REPETITIONS[workload][m.class],
+          })),
+        ),
+    ),
+  );
+}
+
+const endpointsOf = (snapshot: EndpointSnapshot[], model: string): Endpoint[] =>
+  snapshot.filter((e) => e.model === model);
+
+export type DryRunRow = {
+  model: string;
+  workload: Workload;
+  effort: Effort;
+  config: string;
+  tag: string | null;
+  units: number;
+  requests: number;
+  estimateUsd: number;
+  /** Worst case of one unit, as reserved before sending it. */
+  reserveUsd: number;
+};
+
+/** The estimate of every cell of `plan`, warm-ups included. */
+export function dryRun(plan: Unit[], snapshot: EndpointSnapshot[]): DryRunRow[] {
+  const rows = new Map<string, DryRunRow>();
+  for (const unit of plan) {
+    const key = cellKey(unit);
+    const endpoints = endpointsOf(snapshot, unit.model);
+    let row = rows.get(key);
+    if (!row) {
+      row = {
+        model: unit.model,
+        workload: unit.workload,
+        effort: unit.effort,
+        config: unit.config.ids.join('+'),
+        tag: unit.config.tag,
+        units: 0,
+        requests: 0,
+        estimateUsd: 0,
+        reserveUsd: reserve(unit, endpoints) ?? Infinity,
+      };
+      rows.set(key, row);
+    }
+    row.units++;
+    row.requests += requestsOf(unit.workload);
+    row.estimateUsd += estimate(unit, endpoints) ?? Infinity;
+  }
+  // Plan order is shuffled; the table reads by model, workload, effort, then config.
+  const rank = (r: DryRunRow) => [
+    r.model,
+    WORKLOADS.indexOf(r.workload),
+    EFFORTS.indexOf(r.effort),
+    r.tag === null ? '' : r.config,
+  ];
+  return [...rows.values()].toSorted((a, b) => {
+    const [x, y] = [rank(a), rank(b)];
+    const i = x.findIndex((value, index) => value !== y[index]);
+    if (i === -1) return 0;
+    return x[i]! < y[i]! ? -1 : 1;
+  });
+}
+
+/** Requests of one unit: at most, for agentic. */
+const requestsOf = (workload: Workload) =>
+  workload === 'big-context' ? SERIES_LENGTH : workload === 'agentic' ? MAX_AGENTIC_TURNS : 1;
+
+export function formatDryRun(rows: DryRunRow[], maxUsd: number) {
+  const usd = (value: number) => (Number.isFinite(value) ? `$${value.toFixed(4)}` : 'n/a');
+  const table = [
+    ['model', 'workload', 'effort', 'config', 'tag', 'units', 'requests', 'estimate', 'max/unit'],
+    ...rows.map((r) => [
+      r.model,
+      r.workload,
+      r.effort,
+      r.config,
+      r.tag ?? '(auto)',
+      String(r.units),
+      String(r.requests),
+      usd(r.estimateUsd),
+      usd(r.reserveUsd),
+    ]),
+  ];
+  const widths = table[0]!.map((_, i) => Math.max(...table.map((row) => row[i]!.length)));
+  const numeric = new Set([5, 6, 7, 8]);
+  const lines = table.map((row) =>
+    row
+      .map((cell, i) => (numeric.has(i) ? cell.padStart(widths[i]!) : cell.padEnd(widths[i]!)))
+      .join('  '),
+  );
+  const total = rows.reduce((sum, r) => sum + r.estimateUsd, 0);
+  const requests = rows.reduce((sum, r) => sum + r.requests, 0);
+  const tooBig = rows.filter((r) => r.reserveUsd > maxUsd);
+  lines.push(
+    '',
+    `total: ${usd(total)} estimated for ${rows.reduce((s, r) => s + r.units, 0)} units, ` +
+      `at most ${requests} requests (cap $${maxUsd})`,
+  );
+  const subtotals = Map.groupBy(rows, (r) => `${r.model} · ${r.workload}`);
+  lines.push('', 'by model × workload:');
+  for (const [name, group] of subtotals)
+    lines.push(`  ${name}: ${usd(group.reduce((sum, r) => sum + r.estimateUsd, 0))}`);
+  if (tooBig.length > 0)
+    lines.push(`${tooBig.length} cell(s) reserve more than the cap per unit and would never run`);
+  return { text: lines.join('\n'), totalUsd: total, overBudget: total > maxUsd };
+}
+
+export type RunDeps = {
+  send: (body: Record<string, unknown>) => Promise<RequestMetrics>;
+  generation: (id: string) => Promise<Generation | null>;
+  now?: () => Date;
+};
+
+const round1 = (value: number | null) => (value === null ? null : round(value, 1));
+
+/** Sends one unit and returns its lines: one request, an agentic task or a big-context series. */
+export async function runUnit(unit: Unit, runId: string, deps: RunDeps): Promise<ResultLine[]> {
+  const now = deps.now ?? (() => new Date());
+  const maxTokens = MAX_TOKENS[unit.workload][unit.effort]!;
+  const lines: ResultLine[] = [];
+  const request = async (
+    messages: Message[],
+    extra: { turn?: number; position?: number },
+    tools?: unknown[],
+  ) => {
+    const body = buildBody(
+      requestBody(unit.model, unit.effort, maxTokens, messages, tools),
+      unit.config,
+    );

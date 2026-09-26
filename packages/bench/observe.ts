@@ -8,7 +8,7 @@
  * Analytics needs a management key (an inference key gets 403). Resolving the app id by name
  * also needs `OPENROUTER_API_KEY`, because only `/generation` maps a generation to its app.
  */
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { z } from 'zod';
@@ -207,6 +207,16 @@ async function assertOk(response: Response, route: string) {
   throw new Error(
     `OpenRouter ${response.status} (${route})${detail ? `: ${detail.slice(0, 200)}` : ''}`,
   );
+}
+
+/** The newest `observed/*.json` export, or null when there is none. */
+export function latestObserved(dir = path.join(import.meta.dirname, 'observed')): Observed | null {
+  const latest = readdirSync(dir)
+    .filter((file) => file.endsWith('.json'))
+    .sort()
+    .at(-1);
+  if (!latest) return null;
+  return Observed.parse(JSON.parse(readFileSync(path.join(dir, latest), 'utf8')));
 }
 
 function isoDate(ms: number) {

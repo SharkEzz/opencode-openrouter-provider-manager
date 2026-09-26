@@ -46,3 +46,9 @@ export function effortsOf(workload: Workload): Effort[] {
 export const MIN_OBSERVED_REQUESTS = 50;
 export const DEFAULT_MAX_USD = 5;
 export const MAX_AGENTIC_TURNS = 8;
+
+/** Requests of one big-context series: one cold call, then calls on the cached prefix (SPEC §5). */
+export const SERIES_LENGTH = 5;
+
+/** Reasoning tokens expected per request, for the dry-run estimate only (never for reservation). */
+export const EXPECTED_REASONING: Record<Effort, number> = { low: 256, medium: 1_024, high: 3_072 };

@@ -6,20 +6,22 @@
  *
  *   node fake-summary.ts
  */
-import { mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { latestObserved } from './observe.ts';
 import { profileFromObserved } from './profiles.ts';
 import {
   type Cell,
   type CostModel,
   type EndpointSnapshot,
   type Headline,
-  Observed,
+  type Observed,
   type Profile,
   type Sample,
   type Stat,
   Summary,
 } from './schema.ts';
+import { quantile, rng, round } from './stats.ts';
 
 const SEED = 20260925;
 
@@ -167,17 +169,6 @@ const EFFORT = {
   high: { ttft: 1.5, cost: 1.6 },
 };
 
-/** mulberry32: small, seedable, good enough for synthetic data. */
-function rng(seed: number) {
-  let a = seed >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = a;
-    t = Math.imul(t ^ (t >>> 15), t | 1);
-    t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
 // Reset by fakeSummary() so every call replays the same sequence from SEED.
 let random = rng(SEED);
 /** Log-normal multiplier with median 1 (Box–Muller). */
@@ -186,17 +177,7 @@ function logNormal(sigma: number) {
   const v = random();
   return Math.exp(sigma * Math.sqrt(-2 * Math.log(u)) * Math.cos(2 * Math.PI * v));
 }
-const round = (value: number, decimals: number) => {
-  const factor = 10 ** decimals;
-  return Math.round(value * factor) / factor;
-};
 
-function quantile(sorted: number[], q: number) {
-  const index = (sorted.length - 1) * q;
-  const low = Math.floor(index);
-  const high = Math.ceil(index);
-  return sorted[low]! + (sorted[high]! - sorted[low]!) * (index - low);
-}
 /** Synthetic: the CI is a flat ±10% band, not a bootstrap. */
 function stat(values: number[], decimals: number): Stat | null {
   if (values.length === 0) return null;
@@ -215,16 +196,6 @@ function cv(values: number[]) {
   return round(Math.sqrt(variance) / mean, 3);
 }
 const band = (ratio: number): [number, number] => [round(ratio * 0.85, 3), round(ratio * 1.15, 3)];
-
-function latestObserved(): Observed | null {
-  const dir = path.join(import.meta.dirname, 'observed');
-  const files = readdirSync(dir)
-    .filter((file) => file.endsWith('.json'))
-    .sort();
-  const latest = files.at(-1);
-  if (!latest) return null;
-  return Observed.parse(JSON.parse(readFileSync(path.join(dir, latest), 'utf8')));
-}
 
 export function fakeSummary(observed: Observed | null): Summary {
   random = rng(SEED);
