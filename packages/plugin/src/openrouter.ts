@@ -4,56 +4,44 @@ import { z } from 'zod';
 const API = 'https://openrouter.ai/api/v1';
 const TTL = 10 * 60 * 1000;
 
-const RawEndpoint = z
-  .object({
-    provider_name: z.string().optional(),
-    tag: z.string().optional(),
-    context_length: z.number().nullable().optional(),
-    quantization: z.string().nullable().optional(),
-    status: z.number().optional(),
-    uptime_last_30m: z.number().nullable().optional(),
-    supported_parameters: z.array(z.string()).optional(),
-    pricing: z
-      .object({
-        prompt: z.string().optional(),
-        completion: z.string().optional(),
-        input_cache_read: z.string().optional(),
-      })
-      .passthrough()
-      .optional(),
-  })
-  .passthrough();
+const RawEndpoint = z.object({
+  provider_name: z.string().optional(),
+  tag: z.string().optional(),
+  context_length: z.number().nullable().optional(),
+  quantization: z.string().nullable().optional(),
+  status: z.number().optional(),
+  uptime_last_30m: z.number().nullable().optional(),
+  supported_parameters: z.array(z.string()).optional(),
+  pricing: z
+    .object({
+      prompt: z.string().optional(),
+      completion: z.string().optional(),
+      input_cache_read: z.string().optional(),
+    })
+    .optional(),
+});
 
-const EndpointResponse = z
-  .object({
-    data: z
-      .object({ endpoints: z.array(RawEndpoint).optional() })
-      .passthrough()
-      .optional(),
-  })
-  .passthrough();
+const EndpointResponse = z.object({
+  data: z.object({ endpoints: z.array(RawEndpoint).optional() }).optional(),
+});
 
-const ModelsResponse = z
-  .object({
-    data: z
-      .array(
-        z
-          .object({
-            id: z.string(),
-            alias_target: z.object({ slug: z.string().optional() }).optional(),
-          })
-          .passthrough(),
-      )
-      .optional(),
-  })
-  .passthrough();
+const ModelsResponse = z.object({
+  data: z
+    .array(
+      z.object({
+        id: z.string(),
+        alias_target: z.object({ slug: z.string().optional() }).optional(),
+      }),
+    )
+    .optional(),
+});
 
 type RawEndpoint = z.infer<typeof RawEndpoint>;
 
 const cache = new Map<string, { at: number; endpoints: Endpoint[] }>();
 
 /** Test hook: forget every cached listing. */
-export function clearEndpointCache() {
+export function clearEndpointCache(): void {
   cache.clear();
 }
 

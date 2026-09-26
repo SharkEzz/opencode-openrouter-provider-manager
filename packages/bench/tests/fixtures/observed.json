@@ -1,0 +1,62 @@
+{
+  "period": { "from": "2026-08-25", "to": "2026-09-24" },
+  "exportedAt": "2026-09-24T22:57:42.526Z",
+  "rows": [
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "permaslug": "deepseek/deepseek-v4.1-flash-20260801",
+      "provider": "DeepInfra",
+      "requests": 400,
+      "promptTokens": 4000000,
+      "cachedTokens": 3000000,
+      "completionTokens": 40000,
+      "reasoningTokens": 10000,
+      "ttftP50Ms": 900,
+      "ttftP95Ms": 2400,
+      "tpsP50": 80,
+      "cacheHitRate": 0.75
+    },
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "permaslug": "deepseek/deepseek-v4.1-flash-20260801",
+      "provider": "DeepSeek",
+      "requests": 120,
+      "promptTokens": 1200000,
+      "cachedTokens": 1100000,
+      "completionTokens": 12000,
+      "reasoningTokens": 3000,
+      "ttftP50Ms": 1500,
+      "ttftP95Ms": 6000,
+      "tpsP50": 40,
+      "cacheHitRate": 0.92
+    },
+    {
+      "model": "deepseek/deepseek-v4.1-flash",
+      "permaslug": "deepseek/deepseek-v4.1-flash-20260801",
+      "provider": "Groq",
+      "requests": 12,
+      "promptTokens": 100000,
+      "cachedTokens": 99000,
+      "completionTokens": 1000,
+      "reasoningTokens": 0,
+      "ttftP50Ms": 300,
+      "ttftP95Ms": 500,
+      "tpsP50": 300,
+      "cacheHitRate": 0.99
+    },
+    {
+      "model": "z-ai/glm-5.3-flash",
+      "permaslug": "z-ai/glm-5.3-flash-20260901",
+      "provider": "Chutes",
+      "requests": 200,
+      "promptTokens": 2000000,
+      "cachedTokens": 1000000,
+      "completionTokens": 20000,
+      "reasoningTokens": 5000,
+      "ttftP50Ms": 700,
+      "ttftP95Ms": 3000,
+      "tpsP50": 90,
+      "cacheHitRate": 0.5
+    }
+  ]
+}

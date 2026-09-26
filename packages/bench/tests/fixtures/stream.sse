@@ -1,0 +1,14 @@
+: OPENROUTER PROCESSING
+
+data: {"id":"gen-1","choices":[{"delta":{"role":"assistant","content":""},"finish_reason":null}]}
+
+data: {"id":"gen-1","choices":[{"delta":{"reasoning":"plan"},"finish_reason":null}]}
+
+data: {"id":"gen-1","choices":[{"delta":{"content":"Hello"},"finish_reason":null}]}
+
+data: {"id":"gen-1","choices":[{"delta":{"content":" world"},"finish_reason":"stop"}]}
+
+data: {"id":"gen-1","choices":[],"usage":{"prompt_tokens":1200,"completion_tokens":20,"cost":0.00042,"prompt_tokens_details":{"cached_tokens":1000},"completion_tokens_details":{"reasoning_tokens":8}}}
+
+data: [DONE]
+
