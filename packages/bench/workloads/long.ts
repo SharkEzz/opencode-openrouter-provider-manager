@@ -1,6 +1,9 @@
 import { type Message, messageTokens, type WorkloadSpec, worstTokens } from './common.ts';
 
-/** A generation of about 1,500 tokens: mostly throughput and total latency (SPEC §5). */
+/**
+ * A long generation (SPEC §5 asks ~1,500 tokens; the mini-runs measured 1,000 to 3,000 visible
+ * tokens depending on the model): mostly throughput and total latency.
+ */
 
 const SYSTEM = 'You are a senior TypeScript engineer. Reply with a single TypeScript code block.';
 const TASK = [
@@ -19,7 +22,7 @@ function messages(): Message[] {
 }
 
 const spec: WorkloadSpec = {
-  expected: [{ input: messageTokens(messages()), cachedInput: 0, output: 1_500 }],
+  expected: [{ input: messageTokens(messages()), cachedInput: 0, output: 2_000 }],
   worstInput: () => [messageTokens(messages(), worstTokens)],
 };
 

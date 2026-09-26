@@ -75,7 +75,7 @@ describe('dry-run', () => {
     // Without an observed export: auto, cheapest, fastest, default, alt-host.
     expect(rows.map((r) => r.config)).toContain('alt-host');
     expect(rows.every((r) => Number.isFinite(r.estimateUsd) && r.reserveUsd > 0)).toBe(true);
-    const short = rows.find((r) => r.workload === 'short' && r.effort === 'low')!;
+    const short = rows.find((r) => r.workload === 'short' && r.effort === 'medium')!;
     expect(short).toMatchObject({ units: 3, requests: 3 });
     const series = rows.find((r) => r.workload === 'big-context')!;
     // n = 2: one series of two requests, not a full series.
@@ -84,6 +84,23 @@ describe('dry-run', () => {
     expect(overBudget).toBe(true);
     expect(text).toContain('total:');
     expect(fetch).not.toHaveBeenCalled();
+  });
+
+  it('skips the efforts a model class does not measure', async () => {
+    const { models } = await setup([]);
+    const cells = cellsOf(models, {
+      workloads: ['long'],
+      efforts: ['low', 'medium', 'high'],
+      n: 1,
+    });
+    expect(new Set(cells.map((c) => c.effort))).toEqual(new Set(['medium']));
+    // The skip is keyed to the calibrated model, not to its class.
+    const other = cellsOf([{ ...models[0]!, model: 'x/premium' }], {
+      workloads: ['long'],
+      efforts: ['low', 'high'],
+      n: 1,
+    });
+    expect(new Set(other.map((c) => c.effort))).toEqual(new Set(['low', 'high']));
   });
 
   it('refuses a model without endpoints', async () => {
@@ -105,8 +122,8 @@ describe('runUnit', () => {
     const [line] = await runUnit(unit(plan, 'short'), 'run-1', d);
     expect(d.bodies[0]).toMatchObject({
       model: MODEL,
-      max_tokens: 2_000,
-      reasoning: { effort: 'low' },
+      max_tokens: 4_000,
+      reasoning: { effort: 'medium' },
       provider: { only: ['openai/flex'], allow_fallbacks: false },
     });
     expect(line).toMatchObject({
@@ -186,17 +203,31 @@ describe('execute', () => {
     const { endpoints, plan } = await setup(['short']);
     const done = new Set(plan.slice(0, 4).map((u) => u.key));
     const written: ResultLine[][] = [];
+    const enriched: ResultLine[][] = [];
+    // /generation only answers after every unit has been sent (a timer runs after microtasks).
+    const d = deps();
+    const late = new Promise<void>((resolve) => setTimeout(resolve, 0));
+    d.generation.mockImplementation(async () => {
+      await late;
+      return { providerUsed: 'OpenAI', latencyMs: 700, generationTimeMs: 1400 };
+    });
     const result = await execute(plan, {
       runId: 'run-1',
       snapshot: endpoints,
       budget: new Budget(100),
       concurrency: 2,
       done,
-      deps: deps(),
-      write: (lines) => written.push(lines),
+      deps: d,
+      // Snapshot what is written: the lines are enriched in place afterwards.
+      write: (lines) => written.push(structuredClone(lines)),
+      enrich: (lines) => enriched.push(lines),
       log: () => undefined,
     });
     expect(result).toMatchObject({ completed: plan.length - 4, remaining: 0, refused: null });
+    // Written before /generation answers, then enriched once it has.
+    expect(written.flat().every((l) => l.providerUsed === null)).toBe(true);
+    expect(enriched.flat().every((l) => l.providerUsed === 'OpenAI')).toBe(true);
+    expect(enriched).toHaveLength(written.length);
     const keys = written.map((lines) => lines[0]!.key);
     expect(keys.some((key) => done.has(key))).toBe(false);
     expect(new Set(keys).size).toBe(plan.length - 4);
@@ -209,7 +240,7 @@ describe('execute', () => {
       runId: 'run-1',
       snapshot: endpoints,
       // The first units fit (at most $0.08 reserved each), then spending closes the gap.
-      budget: new Budget(0.1),
+      budget: new Budget(0.09),
       concurrency: 1,
       deps: d,
       write: () => undefined,

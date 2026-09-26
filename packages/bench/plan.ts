@@ -127,7 +127,7 @@ export function estimate(unit: Priced, endpoints: Endpoint[]) {
   if (pool.length === 0) return null;
   const maxTokens = maxTokensOf(unit);
   const output = (visible: number) =>
-    Math.min(maxTokens, visible + EXPECTED_REASONING[unit.effort]);
+    Math.min(maxTokens, visible + (EXPECTED_REASONING[unit.workload][unit.effort] ?? 0));
   const cost = (p: Prices) =>
     requestsOf(unit, SPECS[unit.workload].expected).reduce(
       (sum, t) =>

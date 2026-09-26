@@ -98,6 +98,35 @@ export type RunMeta = z.infer<typeof RunMeta>;
 
 export const metaFile = (runId: string, dir = RESULTS_DIR) => path.join(dir, `${runId}.meta.json`);
 export const linesFile = (runId: string, dir = RESULTS_DIR) => path.join(dir, `${runId}.jsonl`);
+export const providersFile = (runId: string, dir = RESULTS_DIR) =>
+  path.join(dir, `${runId}.providers.jsonl`);
+
+/**
+ * What `/generation` adds to a line, ~9 s after the request. Stored apart so a unit is written
+ * as soon as its requests end; `readLines` merges it back.
+ */
+export const ProviderRecord = z.strictObject({
+  key: z.string(),
+  /** The line within its unit: agentic turn, big-context position, else 0. */
+  index: z.number().int().nonnegative(),
+  providerUsed: z.string().nullable(),
+  serverLatencyMs: Nullable,
+  generationTimeMs: Nullable,
+});
+export type ProviderRecord = z.infer<typeof ProviderRecord>;
+
+const indexOf = (line: ResultLine) => line.turn ?? line.position ?? 0;
+const recordId = (key: string, index: number) => `${key}\n${index}`;
+
+export function providerRecord(line: ResultLine): ProviderRecord {
+  return {
+    key: line.key,
+    index: indexOf(line),
+    providerUsed: line.providerUsed,
+    serverLatencyMs: line.serverLatencyMs,
+    generationTimeMs: line.generationTimeMs,
+  };
+}
 
 export function writeMeta(meta: RunMeta, dir = RESULTS_DIR) {
   mkdirSync(dir, { recursive: true });
@@ -110,19 +139,39 @@ export function readMeta(runId: string, dir = RESULTS_DIR): RunMeta {
   return RunMeta.parse(JSON.parse(readFileSync(file, 'utf8')));
 }
 
-export function readLines(runId: string, dir = RESULTS_DIR): ResultLine[] {
-  const file = linesFile(runId, dir);
+function readJsonl<T>(file: string, schema: z.ZodType<T>): T[] {
   if (!existsSync(file)) return [];
   return readFileSync(file, 'utf8')
     .split('\n')
     .filter((line) => line.trim())
-    .map((line) => ResultLine.parse(JSON.parse(line)));
+    .map((line) => schema.parse(JSON.parse(line)));
 }
+
+/** The lines of a run, with the providers found by `/generation` merged in. */
+export function readLines(runId: string, dir = RESULTS_DIR): ResultLine[] {
+  const records = new Map(
+    readJsonl(providersFile(runId, dir), ProviderRecord).map((r) => [recordId(r.key, r.index), r]),
+  );
+  return readJsonl(linesFile(runId, dir), ResultLine).map((line) => {
+    const record = records.get(recordId(line.key, indexOf(line)));
+    if (!record) return line;
+    const { providerUsed, serverLatencyMs, generationTimeMs } = record;
+    return Object.assign(line, { providerUsed, serverLatencyMs, generationTimeMs });
+  });
+}
+
+const appendJsonl = (file: string, items: unknown[]) => {
+  if (items.length > 0) appendFileSync(file, items.map((i) => `${JSON.stringify(i)}\n`).join(''));
+};
 
 /** Appends the lines of one finished unit at once, so an interrupted unit leaves nothing. */
 export function appendLines(runId: string, lines: ResultLine[], dir = RESULTS_DIR) {
-  if (lines.length === 0) return;
-  appendFileSync(linesFile(runId, dir), lines.map((line) => `${JSON.stringify(line)}\n`).join(''));
+  appendJsonl(linesFile(runId, dir), lines);
+}
+
+/** Appends the `/generation` results of a unit already written. */
+export function appendProviders(runId: string, lines: ResultLine[], dir = RESULTS_DIR) {
+  appendJsonl(providersFile(runId, dir), lines.map(providerRecord));
 }
 
 /** The newest run id with a meta file. */

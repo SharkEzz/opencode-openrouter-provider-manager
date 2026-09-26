@@ -169,6 +169,11 @@ describe('summarize', () => {
     for (const h of summary.headlines) expect(h.ci[0] > 1 || h.ci[1] < 1).toBe(true);
   });
 
+  it('headlines nothing below the minimum number of successes', () => {
+    const few = lines.filter((l) => l.workload !== 'short' || l.iteration < 4);
+    expect(summarize(meta, few).headlines).toEqual([]);
+  });
+
   it('reports auto providers, switches, the cache ratio and cold vs cached', () => {
     expect(cell(summary, 'short', 'auto')!.providers).toEqual({ 'Host A': 0.75, 'Host B': 0.25 });
     expect(cell(summary, 'agentic', 'auto')).toMatchObject({ n: 1, providerSwitchRate: 1 });
