@@ -13,7 +13,16 @@
   },
   "options": {
     "reportUnusedDisableDirectives": "warn",
+    "typeCheck": true,
     "typeAware": true
+  },
+  "settings": {
+    "react": {
+      "version": "19.3.0"
+    },
+    "vitest": {
+      "typecheck": true
+    }
   },
   "plugins": ["oxc", "typescript", "node", "promise"],
   "categories": {
@@ -21,10 +30,19 @@
     "perf": "warn",
     "suspicious": "warn"
   },
+  "rules": {
+    "typescript/no-deprecated": "error"
+  },
   "overrides": [
     {
-      "files": ["packages/*/tests/**/*"],
-      "plugins": ["vitest"]
+      "files": ["**/tests/**/*"],
+      "plugins": ["vitest"],
+      "env": {
+        "vitest": true
+      },
+      "rules": {
+        "vitest/require-test-timeout": "off"
+      }
     }
   ]
 }

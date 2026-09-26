@@ -14,14 +14,10 @@ export const MODEL_STATE_FILE = path.join(
   'model.json',
 );
 
-const ModelState = z
-  .object({
-    recent: z
-      .array(z.object({ providerID: z.string(), modelID: z.string() }).passthrough())
-      .optional(),
-    variant: z.record(z.string(), z.string()).optional(),
-  })
-  .passthrough();
+const ModelState = z.object({
+  recent: z.array(z.object({ providerID: z.string(), modelID: z.string() })).optional(),
+  variant: z.record(z.string(), z.string()).optional(),
+});
 
 /** Last model picked in the TUI, with its variant, and when that selection was written. */
 export function pickedModel(): { model: ModelRef; at: number } | undefined {
