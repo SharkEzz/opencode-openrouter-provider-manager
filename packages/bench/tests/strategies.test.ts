@@ -129,6 +129,28 @@ describe('resolveConfigs', () => {
     );
     expect(resolution.configs.map((c) => c.tag)).not.toContain('free/beta');
   });
+
+  it('drops an incompletely priced endpoint from every strategy, even without a profile', () => {
+    const ds0 = deepseek[0];
+    if (ds0 == undefined) throw new Error('Failed to find deepseek result');
+    // Cheapest by input price and the origin tag, but its output price is unknown.
+    const unpriced: Endpoint = {
+      ...ds0,
+      tag: 'deepseek',
+      provider: 'DeepSeek',
+      input: 0.01,
+      output: null,
+    };
+    const others = deepseek.filter((e) => e.tag !== 'deepseek');
+    const resolution = resolveConfigs(
+      'deepseek/deepseek-v4.1-flash',
+      [unpriced, ...others],
+      null,
+      null,
+    );
+    expect(resolution.configs.map((c) => c.tag)).not.toContain('deepseek');
+    expect(resolution.omitted).toContainEqual({ id: 'default', reason: 'no deepseek endpoint' });
+  });
 });
 
 describe('buildBody', () => {

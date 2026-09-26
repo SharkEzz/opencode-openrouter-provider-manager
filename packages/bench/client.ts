@@ -244,6 +244,8 @@ export type GenerationOptions = {
   fetch?: typeof fetch;
   attempts?: number;
   delayMs?: number;
+  /** Per attempt: a stalled lookup is abandoned and retried like a missing entry. */
+  attemptTimeoutMs?: number;
   sleep?: (ms: number) => Promise<void>;
 };
 
@@ -258,6 +260,7 @@ export async function fetchGeneration(
     fetch: fetchImpl = globalThis.fetch,
     attempts = 5,
     delayMs = 500,
+    attemptTimeoutMs = 10_000,
     sleep = async (ms) => new Promise((resolve) => setTimeout(resolve, ms)),
   }: GenerationOptions,
 ): Promise<Generation | null> {
@@ -267,6 +270,7 @@ export async function fetchGeneration(
     try {
       const response = await fetchImpl(`${API}/generation?id=${encodeURIComponent(id)}`, {
         headers: { authorization: `Bearer ${apiKey}` },
+        signal: AbortSignal.timeout(attemptTimeoutMs),
       });
       if (!response.ok) continue;
       const { data } = Generation.parse(await response.json());

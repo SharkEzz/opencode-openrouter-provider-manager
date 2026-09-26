@@ -89,8 +89,10 @@ export function resolveConfigs(
   profile: Profile | null,
 ): Resolution {
   // Same filters as the plugin: no router, one entry per tag (the cheapest by input price).
+  // An endpoint without input or output price can't be reserved against the budget (SPEC §4, §8);
+  // a missing cache price is fine, it falls back to the input price.
   const endpoints = listing
-    .filter((e) => e.tag !== 'router')
+    .filter((e) => e.tag !== 'router' && e.input !== null && e.output !== null)
     .toSorted((a, b) => (a.input ?? Infinity) - (b.input ?? Infinity))
     .filter((e, index, all) => all.findIndex((other) => other.tag === e.tag) === index);
   const cost = profile ? (e: Endpoint) => weightedCost(e, profile) : (e: Endpoint) => e.input;

@@ -191,6 +191,25 @@ describe('fetchGeneration', () => {
     expect(fetch.mock.calls[0]?.[0]).toBe('https://openrouter.ai/api/v1/generation?id=gen-1');
   });
 
+  it('abandons a stalled attempt and retries it', async () => {
+    const stall = vi.fn<typeof globalThis.fetch>(
+      async (_url, init) =>
+        new Promise((_resolve, reject) =>
+          init?.signal?.addEventListener('abort', () => reject(init.signal?.reason)),
+        ),
+    );
+    stall.mockImplementationOnce(stall.getMockImplementation()!);
+    stall.mockImplementation(async () => Response.json(entry));
+    const generation = await fetchGeneration('gen-1', {
+      apiKey: KEY,
+      fetch: stall,
+      attemptTimeoutMs: 20,
+      sleep: async () => undefined,
+    });
+    expect(generation?.providerUsed).toBe('DeepInfra');
+    expect(stall).toHaveBeenCalledTimes(2);
+  });
+
   it('gives up after the last attempt', async () => {
     const fetch = mockFetch(() => new Response('not found', { status: 404 }));
     const generation = await fetchGeneration('gen-1', {
