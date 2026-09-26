@@ -9,6 +9,7 @@ import path from 'node:path';
 import { MIN_HEADLINE_N, type Workload } from './config.ts';
 import { profileFromObserved } from './profiles.ts';
 import {
+  latestAttempts,
   latestRunId,
   readLines,
   readMeta,
@@ -301,7 +302,9 @@ function measuredProfile(lines: ResultLine[], id: string, label: string): Profil
   };
 }
 
-export function summarize(meta: RunMeta, lines: ResultLine[]): Summary {
+export function summarize(meta: RunMeta, all: ResultLine[]): Summary {
+  // Metrics come from the last attempt of each unit; spending counts every attempt.
+  const lines = latestAttempts(all);
   const groups = groupsOf(lines);
   const cells: Cell[] = [];
   const headlines: Headline[] = [];
@@ -359,7 +362,7 @@ export function summarize(meta: RunMeta, lines: ResultLine[]): Summary {
       seed: meta.seed,
       maxUsd: meta.args.maxUsd,
       spentUsd: round(
-        lines.reduce((sum, l) => sum + (l.costUsd ?? 0), 0),
+        all.reduce((sum, l) => sum + (l.costUsd ?? 0), 0),
         6,
       ),
       synthetic: false,

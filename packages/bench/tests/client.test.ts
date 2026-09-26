@@ -147,6 +147,19 @@ describe('send', () => {
     expect((await send({}, { apiKey: KEY, fetch })).status).toBe('stream_error');
   });
 
+  it('keeps the network code of a failed connection', async () => {
+    const fetch = mockFetch(async () => {
+      throw new TypeError('fetch failed', {
+        cause: Object.assign(new Error(), { code: 'ENOTFOUND' }),
+      });
+    });
+    const metrics = await send({ model: 'a/model' }, { apiKey: KEY, fetch });
+    expect(metrics).toMatchObject({
+      status: 'stream_error',
+      error: { code: null, message: 'fetch failed: ENOTFOUND' },
+    });
+  });
+
   it('times out when the headers never come', async () => {
     const hang = vi.fn<typeof globalThis.fetch>(
       async (_url, init) =>

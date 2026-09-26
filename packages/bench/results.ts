@@ -147,7 +147,48 @@ function readJsonl<T>(file: string, schema: z.ZodType<T>): T[] {
     .map((line) => schema.parse(JSON.parse(line)));
 }
 
-/** The lines of a run, with the providers found by `/generation` merged in. */
+/**
+ * A request that got no response (`fetch failed`, e.g. the network is down). It measured
+ * nothing, so `--resume` sends its unit again.
+ */
+export const unanswered = (line: ResultLine) =>
+  line.status === 'stream_error' && (line.error?.message.startsWith('fetch failed') ?? false);
+
+/** Connection errors: the request was never transmitted. */
+const UNSENT =
+  /^fetch failed: (ENOTFOUND|EAI_AGAIN|ECONNREFUSED|ENETUNREACH|EHOSTUNREACH|UND_ERR_CONNECT_TIMEOUT)$/;
+
+/** A request that failed to connect, so nothing reached OpenRouter and nothing was billed. */
+export const unsent = (line: ResultLine) =>
+  line.status === 'stream_error' && UNSENT.test(line.error?.message ?? '');
+
+/**
+ * Splits lines into unit attempts. A unit is appended in one block whose indexes grow, so a
+ * repeated key or a non-growing index starts a new attempt (a unit sent again on `--resume`).
+ */
+export function unitAttempts(lines: ResultLine[]): ResultLine[][] {
+  const attempts: ResultLine[][] = [];
+  let previous: ResultLine | null = null;
+  for (const line of lines) {
+    if (previous?.key === line.key && indexOf(line) > indexOf(previous))
+      attempts.at(-1)!.push(line);
+    else attempts.push([line]);
+    previous = line;
+  }
+  return attempts;
+}
+
+/** The last attempt of each unit, for metrics; spending counts every attempt. */
+export function latestAttempts(lines: ResultLine[]) {
+  const latest = new Map<string, ResultLine[]>();
+  for (const attempt of unitAttempts(lines)) latest.set(attempt[0]!.key, attempt);
+  return [...latest.values()].flat();
+}
+
+/**
+ * The lines of a run, every attempt included, with the providers found by `/generation` merged
+ * in (the newest record wins).
+ */
 export function readLines(runId: string, dir = RESULTS_DIR): ResultLine[] {
   const records = new Map(
     readJsonl(providersFile(runId, dir), ProviderRecord).map((r) => [recordId(r.key, r.index), r]),

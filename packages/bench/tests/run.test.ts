@@ -8,6 +8,7 @@ import { Budget, buildPlan, reserve, type Unit } from '../plan.ts';
 import type { ResultLine } from '../results.ts';
 import {
   cellsOf,
+  doneKeys,
   dryRun,
   execute,
   formatDryRun,
@@ -66,6 +67,11 @@ afterEach(() => {
   vi.unstubAllGlobals();
 });
 
+const unit = (plan: Unit[], workload: string, tag: string | null = 'openai/flex') =>
+  plan.find(
+    (u) => u.workload === workload && u.config.tag === tag && !u.warmup && u.effort !== 'medium',
+  ) ?? plan.find((u) => u.workload === workload && u.config.tag === tag && !u.warmup)!;
+
 describe('dry-run', () => {
   it('estimates every cell from the listing without sending a request', async () => {
     const fetch = vi.fn<typeof globalThis.fetch>();
@@ -111,11 +117,6 @@ describe('dry-run', () => {
 });
 
 describe('runUnit', () => {
-  const unit = (plan: Unit[], workload: string, tag: string | null = 'openai/flex') =>
-    plan.find(
-      (u) => u.workload === workload && u.config.tag === tag && !u.warmup && u.effort !== 'medium',
-    ) ?? plan.find((u) => u.workload === workload && u.config.tag === tag && !u.warmup)!;
-
   it('pins the body and records metrics, never content', async () => {
     const { plan } = await setup(['short']);
     const d = deps();
@@ -196,6 +197,64 @@ describe('spentBy', () => {
     )!;
     expect(spentBy(plan, lines, endpoints)).toBeCloseTo(0.002 + reserved);
   });
+
+  it('charges nothing for a request that failed to connect or was rejected over HTTP', async () => {
+    const { endpoints, plan } = await setup(['short']);
+    const d = deps([
+      metrics({
+        status: 'stream_error',
+        error: { code: null, message: 'fetch failed: ENOTFOUND' },
+        costUsd: null,
+      }),
+      metrics({ status: 'http_429', error: { code: 429, message: 'rate limited' }, costUsd: null }),
+    ]);
+    const lines = [
+      ...(await runUnit(plan[0]!, 'run-1', d)),
+      ...(await runUnit(plan[1]!, 'run-1', d)),
+    ];
+    expect(spentBy(plan, lines, endpoints)).toBe(0);
+  });
+
+  it('keeps the reservation when a request may have been sent, and counts every attempt', async () => {
+    const { endpoints, plan } = await setup(['short']);
+    const target = plan[0]!;
+    const d = deps([
+      metrics({
+        status: 'stream_error',
+        error: { code: null, message: 'fetch failed' },
+        costUsd: null,
+      }),
+      metrics({ costUsd: 0.002 }),
+    ]);
+    const first = await runUnit(target, 'run-1', d);
+    const reserved = reserve(
+      target,
+      endpoints.filter((e) => e.model === MODEL),
+    )!;
+    expect(spentBy(plan, first, endpoints)).toBeCloseTo(reserved);
+    // Sent again on resume: the earlier attempt still counts.
+    const lines = [...first, ...(await runUnit(target, 'run-1', d))];
+    expect(spentBy(plan, lines, endpoints)).toBeCloseTo(reserved + 0.002);
+  });
+});
+
+describe('doneKeys', () => {
+  it('sends again on resume the units with a request that got no response', async () => {
+    const { plan } = await setup(['short', 'agentic']);
+    const agentic = unit(plan, 'agentic');
+    const short = unit(plan, 'short');
+    const d = deps([
+      metrics({ toolCalls: [{ id: 'c', name: 'read', arguments: '{}' }] }),
+      metrics({ status: 'stream_error', error: { code: null, message: 'fetch failed' } }),
+      metrics({ status: 'stream_error', error: { code: null, message: 'terminated' } }),
+    ]);
+    const lines = [...(await runUnit(agentic, 'run-1', d)), ...(await runUnit(short, 'run-1', d))];
+    // A stream cut after tokens came is a measured failure; only the silent unit is sent again.
+    expect([...doneKeys(lines)]).toEqual([short.key]);
+    // Once sent again with success, it is done.
+    lines.push(...(await runUnit(agentic, 'run-1', d)));
+    expect(doneKeys(lines)).toEqual(new Set([short.key, agentic.key]));
+  });
 });
 
 describe('execute', () => {
@@ -251,5 +310,31 @@ describe('execute', () => {
     expect(result.completed).toBeGreaterThan(0);
     expect(result.completed + result.remaining).toBe(plan.length);
     expect(d.send).toHaveBeenCalledTimes(result.completed);
+  });
+
+  it('stops once several units in a row get no response', async () => {
+    const { endpoints, plan } = await setup(['short']);
+    const d = deps();
+    d.send.mockResolvedValue(
+      metrics({
+        status: 'stream_error',
+        error: { code: null, message: 'fetch failed: ECONNREFUSED' },
+        costUsd: null,
+      }),
+    );
+    const budget = new Budget(100);
+    const result = await execute(plan, {
+      runId: 'run-1',
+      snapshot: endpoints,
+      budget,
+      concurrency: 1,
+      deps: d,
+      write: () => undefined,
+      enrich: () => undefined,
+      log: () => undefined,
+    });
+    expect(result).toMatchObject({ completed: 3, refused: null });
+    expect(result.offline?.key).toBe(plan[2]!.key);
+    expect(budget.spent).toBe(0);
   });
 });

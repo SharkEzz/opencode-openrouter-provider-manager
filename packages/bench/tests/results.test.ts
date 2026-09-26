@@ -2,7 +2,13 @@ import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
-import { appendLines, appendProviders, readLines, type ResultLine } from '../results.ts';
+import {
+  appendLines,
+  appendProviders,
+  latestAttempts,
+  readLines,
+  type ResultLine,
+} from '../results.ts';
 
 const dirs: string[] = [];
 afterEach(() => {
@@ -54,6 +60,24 @@ describe('readLines', () => {
       ['unit', 0, null],
       ['unit', 1, 'Host B'],
       ['other', 0, null],
+    ]);
+  });
+});
+
+describe('latestAttempts', () => {
+  it('keeps only the last attempt of a unit sent again', () => {
+    const failed = { status: 'stream_error' as const, costUsd: null };
+    const lines = [
+      line({ turn: 0 }),
+      line({ turn: 1, ...failed }),
+      line({ key: 'short', ...failed }),
+      // Sent again right after its failure: same key, the index starts over.
+      line({ key: 'short' }),
+      line({ turn: 0, costUsd: 0.002 }),
+    ];
+    expect(latestAttempts(lines).map((l) => [l.key, l.turn, l.status, l.costUsd])).toEqual([
+      ['unit', 0, 'ok', 0.002],
+      ['short', undefined, 'ok', 0.001],
     ]);
   });
 });
