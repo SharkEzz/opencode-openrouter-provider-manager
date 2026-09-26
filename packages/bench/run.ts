@@ -46,6 +46,7 @@ import {
   type ResultLine,
   RESULTS_DIR,
   type RunMeta,
+  unanswered,
   writeMeta,
 } from './results.ts';
 import type { EndpointSnapshot, Observed } from './schema.ts';
@@ -345,19 +346,40 @@ export function spentBy(plan: Unit[], lines: ResultLine[], snapshot: EndpointSna
   return spent;
 }
 
+/**
+ * Real cost of a line. Without usage it is free only when no provider generated anything: no
+ * response at all, or an HTTP error before the stream (OpenRouter bills neither). Else unknown.
+ */
+const lineCost = (line: ResultLine) =>
+  line.costUsd ?? (unanswered(line) || line.status.startsWith('http_') ? 0 : null);
+
 /** Real cost of a unit, or null when one of its requests has none. */
 function unitCost(lines: ResultLine[]) {
   let sum = 0;
   for (const line of lines) {
-    if (line.costUsd === null) return null;
-    sum += line.costUsd;
+    const cost = lineCost(line);
+    if (cost === null) return null;
+    sum += cost;
   }
   return sum;
 }
 
 /**
+ * The units `--resume` skips: every unit written, except those with a request that got no
+ * response, which measured nothing and are sent again.
+ */
+export function doneKeys(lines: ResultLine[]) {
+  const retried = new Set(lines.filter(unanswered).map((line) => line.key));
+  return new Set(lines.map((line) => line.key).filter((key) => !retried.has(key)));
+}
+
+/** Consecutive units without a response after which the network is taken for down. */
+const MAX_UNANSWERED = 3;
+
+/**
  * Runs `plan` with `concurrency` workers under `budget`, skipping `done` keys. When a
- * reservation is refused, no new unit starts; the ones in flight finish. A unit is settled and
+ * reservation is refused, or `MAX_UNANSWERED` units in a row get no response (`offline`), no new
+ * unit starts; the ones in flight finish. A unit is settled and
  * written as soon as its requests end; its `/generation` lookups finish in the background and
  * are recorded apart (a unit interrupted before them keeps null providers).
  */
@@ -391,9 +413,11 @@ export async function execute(
   let completed = 0;
   // Assigned inside the workers: annotate so the check after `await` is not narrowed to null.
   let refused = null as Unit | null;
+  let offline = null as Unit | null;
+  let silent = 0;
   const writes: Promise<void>[] = [];
   const worker = async () => {
-    while (refused === null && next < todo.length) {
+    while (refused === null && offline === null && next < todo.length) {
       const unit = todo[next++]!;
       const usd = reserve(unit, endpointsOf(snapshot, unit.model));
       const reservation = usd === null ? null : budget.tryReserve(usd);
@@ -405,6 +429,8 @@ export async function execute(
       const { lines, lookups } = await sendUnit(unit, runId, deps);
       budget.settle(reservation, unitCost(lines));
       completed++;
+      silent = lines.some(unanswered) ? silent + 1 : 0;
+      if (silent >= MAX_UNANSWERED) offline ??= unit;
       log(
         `[${done.size + completed}/${plan.length}] ${unit.key} · ${lines.map((l) => l.status).join(',')} · $${budget.spent.toFixed(4)}`,
       );
@@ -416,7 +442,7 @@ export async function execute(
   await Promise.all(Array.from({ length: concurrency }, worker));
   if (writes.length > 0) log('waiting for the last /generation lookups…');
   await Promise.all(writes);
-  return { completed, remaining: todo.length - completed, refused };
+  return { completed, remaining: todo.length - completed, refused, offline };
 }
 
 function list<T extends string>(
@@ -531,12 +557,15 @@ async function main() {
     `\nrun ${meta.runId} · ${plan.length} units · cap $${meta.args.maxUsd} → ${RESULTS_DIR}`,
   );
   const budget = new Budget(meta.args.maxUsd, spentBy(plan, lines, meta.endpoints));
+  const done = doneKeys(lines);
+  const retried = new Set(lines.map((line) => line.key)).size - done.size;
+  if (retried > 0) console.log(`sending again ${retried} units that got no response`);
   const result = await execute(plan, {
     runId: meta.runId,
     snapshot: meta.endpoints,
     budget,
     concurrency: meta.args.concurrency,
-    done: new Set(lines.map((line) => line.key)),
+    done,
     deps: {
       send: async (body, timeoutMs) => send(body, { apiKey, timeoutMs }),
       // The entry appears ~9 s after the request: first retry at 2 s, last at ~62 s.
@@ -549,6 +578,13 @@ async function main() {
       `budget reached before ${result.refused.key}: ${result.remaining} units left; ` +
         `raise --max-usd and pass --resume ${meta.runId}`,
     );
+  if (result.offline) {
+    process.exitCode = 1;
+    console.log(
+      `no response for ${MAX_UNANSWERED} units in a row, up to ${result.offline.key}: ` +
+        `check the network and pass --resume ${meta.runId}`,
+    );
+  }
 }
 
 if (import.meta.main) {

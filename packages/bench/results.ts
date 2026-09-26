@@ -147,12 +147,39 @@ function readJsonl<T>(file: string, schema: z.ZodType<T>): T[] {
     .map((line) => schema.parse(JSON.parse(line)));
 }
 
-/** The lines of a run, with the providers found by `/generation` merged in. */
+/**
+ * A request that got no response at all (`fetch failed`, the network is down): nothing reached a
+ * provider, so it costs nothing and measures nothing. `--resume` sends its unit again.
+ */
+export const unanswered = (line: ResultLine) =>
+  line.status === 'stream_error' && line.error?.message === 'fetch failed';
+
+/**
+ * Keeps the last attempt of each unit. A unit is appended in one block whose indexes grow, so a
+ * repeated key or a non-growing index starts a new attempt (a unit sent again on `--resume`).
+ */
+function lastAttempts(lines: ResultLine[]) {
+  const attempts = new Map<string, ResultLine[]>();
+  let previous: ResultLine | null = null;
+  for (const line of lines) {
+    const current = attempts.get(line.key);
+    if (current && previous?.key === line.key && indexOf(line) > indexOf(previous))
+      current.push(line);
+    else attempts.set(line.key, [line]);
+    previous = line;
+  }
+  return [...attempts.values()].flat();
+}
+
+/**
+ * The lines of a run, last attempt of each unit only, with the providers found by `/generation`
+ * merged in (the newest record wins).
+ */
 export function readLines(runId: string, dir = RESULTS_DIR): ResultLine[] {
   const records = new Map(
     readJsonl(providersFile(runId, dir), ProviderRecord).map((r) => [recordId(r.key, r.index), r]),
   );
-  return readJsonl(linesFile(runId, dir), ResultLine).map((line) => {
+  return lastAttempts(readJsonl(linesFile(runId, dir), ResultLine)).map((line) => {
     const record = records.get(recordId(line.key, indexOf(line)));
     if (!record) return line;
     const { providerUsed, serverLatencyMs, generationTimeMs } = record;
