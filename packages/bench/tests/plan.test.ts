@@ -13,7 +13,7 @@ const flex: Config = { ids: ['cheapest'], tag: 'openai/flex', fromObserved: [] }
 const fast: Config = { ids: ['fastest'], tag: 'openai/fast', fromObserved: [] };
 
 const cells: Cell[] = [auto, flex, fast].flatMap((config) => [
-  { model: 'openai/gpt-6-sol', config, workload: 'short', effort: 'low', n: 4 },
+  { model: 'openai/gpt-6-sol', config, workload: 'short', effort: 'medium', n: 4 },
   { model: 'openai/gpt-6-sol', config, workload: 'big-context', effort: 'medium', n: 10 },
 ]);
 
@@ -50,12 +50,12 @@ describe('buildPlan', () => {
 });
 
 describe('estimate and reserve', () => {
-  const unit = { config: flex, workload: 'short', effort: 'low' } as const;
+  const unit = { config: flex, workload: 'short', effort: 'medium' } as const;
 
   it('reserves the worst case: max_tokens at the output price', () => {
     const reserved = reserve(unit, sol)!;
     // openai/flex: $5/M output.
-    expect(reserved).toBeGreaterThan((MAX_TOKENS.short.low! * 5) / 1e6);
+    expect(reserved).toBeGreaterThan((MAX_TOKENS.short.medium! * 5) / 1e6);
     expect(estimate(unit, sol)!).toBeLessThan(reserved);
   });
 

@@ -30,6 +30,7 @@ import {
   MODELS,
   REPETITIONS,
   SERIES_LENGTH,
+  timeoutFor,
   type Workload,
   WORKLOADS,
 } from './config.ts';
@@ -92,7 +93,7 @@ export function cellsOf(
 ): Cell[] {
   return models.flatMap((m) =>
     workloads.flatMap((workload) =>
-      effortsOf(workload)
+      effortsOf(workload, m.class)
         .filter((effort) => efforts.includes(effort))
         .flatMap((effort) =>
           m.configs.map((config) => ({
@@ -212,18 +213,28 @@ export function formatDryRun(rows: DryRunRow[], maxUsd: number) {
 }
 
 export type RunDeps = {
-  send: (body: Record<string, unknown>) => Promise<RequestMetrics>;
+  send: (body: Record<string, unknown>, timeoutMs: number) => Promise<RequestMetrics>;
   generation: (id: string) => Promise<Generation | null>;
   now?: () => Date;
 };
 
 const round1 = (value: number | null) => (value === null ? null : round(value, 1));
 
-/** Sends one unit and returns its lines: one request, an agentic task or a big-context series. */
-export async function runUnit(unit: Unit, runId: string, deps: RunDeps): Promise<ResultLine[]> {
+/**
+ * Sends one unit (one request, an agentic task or a big-context series). Its lines come back as
+ * soon as the requests are done; `lookups` settles once `/generation` has filled in the provider
+ * of each one. The entry shows up about 9 s after a request, so waiting for it before the next
+ * request would stretch the run for hours.
+ */
+export async function sendUnit(
+  unit: Unit,
+  runId: string,
+  deps: RunDeps,
+): Promise<{ lines: ResultLine[]; lookups: Promise<void> }> {
   const now = deps.now ?? (() => new Date());
   const maxTokens = MAX_TOKENS[unit.workload][unit.effort]!;
   const lines: ResultLine[] = [];
+  const lookups: Promise<void>[] = [];
   const request = async (
     messages: Message[],
     extra: { turn?: number; position?: number },
@@ -234,9 +245,8 @@ export async function runUnit(unit: Unit, runId: string, deps: RunDeps): Promise
       unit.config,
     );
     const startedAt = now().toISOString();
-    const metrics = await deps.send(body);
-    const generation = metrics.generationId ? await deps.generation(metrics.generationId) : null;
-    lines.push({
+    const metrics = await deps.send(body, timeoutFor(maxTokens));
+    const line: ResultLine = {
       runId,
       key: unit.key,
       model: unit.model,
@@ -261,10 +271,21 @@ export async function runUnit(unit: Unit, runId: string, deps: RunDeps): Promise
       cachedTokens: metrics.cachedTokens,
       costUsd: metrics.costUsd,
       toolCalls: metrics.toolCalls.length,
-      providerUsed: generation?.providerUsed ?? null,
-      serverLatencyMs: generation?.latencyMs ?? null,
-      generationTimeMs: generation?.generationTimeMs ?? null,
-    });
+      providerUsed: null,
+      serverLatencyMs: null,
+      generationTimeMs: null,
+    };
+    lines.push(line);
+    const { generationId } = metrics;
+    if (generationId) {
+      const lookup = async () => {
+        const generation = await deps.generation(generationId);
+        line.providerUsed = generation?.providerUsed ?? null;
+        line.serverLatencyMs = generation?.latencyMs ?? null;
+        line.generationTimeMs = generation?.generationTimeMs ?? null;
+      };
+      lookups.push(lookup());
+    }
     return metrics;
   };
 
@@ -293,6 +314,13 @@ export async function runUnit(unit: Unit, runId: string, deps: RunDeps): Promise
     }
   }
   /* oxlint-enable no-await-in-loop */
+  return { lines, lookups: Promise.all(lookups).then(() => undefined) };
+}
+
+/** Sends one unit and waits for its `/generation` lookups. */
+export async function runUnit(unit: Unit, runId: string, deps: RunDeps): Promise<ResultLine[]> {
+  const { lines, lookups } = await sendUnit(unit, runId, deps);
+  await lookups;
   return lines;
 }
 
@@ -328,7 +356,9 @@ function unitCost(lines: ResultLine[]) {
 
 /**
  * Runs `plan` with `concurrency` workers under `budget`, skipping `done` keys. When a
- * reservation is refused, no new unit starts; the ones in flight finish.
+ * reservation is refused, no new unit starts; the ones in flight finish. A unit is settled as
+ * soon as its requests end, and written once its `/generation` lookups are done, in the
+ * background while the next units run.
  */
 export async function execute(
   plan: Unit[],
@@ -357,6 +387,7 @@ export async function execute(
   let completed = 0;
   // Assigned inside the workers: annotate so the check after `await` is not narrowed to null.
   let refused = null as Unit | null;
+  const writes: Promise<void>[] = [];
   const worker = async () => {
     while (refused === null && next < todo.length) {
       const unit = todo[next++]!;
@@ -367,16 +398,18 @@ export async function execute(
         return;
       }
       // oxlint-disable-next-line no-await-in-loop -- each worker runs one unit at a time
-      const lines = await runUnit(unit, runId, deps);
+      const { lines, lookups } = await sendUnit(unit, runId, deps);
       budget.settle(reservation, unitCost(lines));
-      write(lines);
       completed++;
       log(
         `[${done.size + completed}/${plan.length}] ${unit.key} · ${lines.map((l) => l.status).join(',')} · $${budget.spent.toFixed(4)}`,
       );
+      writes.push(lookups.then(() => write(lines)));
     }
   };
   await Promise.all(Array.from({ length: concurrency }, worker));
+  if (writes.length > 0) log('waiting for the last /generation lookups…');
+  await Promise.all(writes);
   return { completed, remaining: todo.length - completed, refused };
 }
 
@@ -499,8 +532,9 @@ async function main() {
     concurrency: meta.args.concurrency,
     done: new Set(lines.map((line) => line.key)),
     deps: {
-      send: async (body) => send(body, { apiKey }),
-      generation: async (id) => fetchGeneration(id, { apiKey }),
+      send: async (body, timeoutMs) => send(body, { apiKey, timeoutMs }),
+      // The entry appears ~9 s after the request: first retry at 2 s, last at ~62 s.
+      generation: async (id) => fetchGeneration(id, { apiKey, attempts: 6, delayMs: 2_000 }),
     },
   });
   console.log(`\nspent $${budget.spent.toFixed(4)} · ${result.completed} units run`);

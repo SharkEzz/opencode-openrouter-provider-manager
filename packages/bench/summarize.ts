@@ -6,7 +6,7 @@
  */
 import { readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import type { Workload } from './config.ts';
+import { MIN_HEADLINE_N, type Workload } from './config.ts';
 import { profileFromObserved } from './profiles.ts';
 import {
   latestRunId,
@@ -181,10 +181,10 @@ function vsAuto(pin: Group, auto: Group): Cell['vsAuto'] {
 
 const METRICS = ['cost', 'ttft', 'stability', 'cacheHit'] as const;
 
-/** Only the ratios whose interval excludes 1. */
+/** Only the ratios whose interval excludes 1, with enough successes on both sides. */
 function headlinesOf(cell: Cell, auto: Cell): Headline[] {
   const vs = cell.vsAuto;
-  if (!vs) return [];
+  if (!vs || cell.ok < MIN_HEADLINE_N || auto.ok < MIN_HEADLINE_N) return [];
   const pair = (metric: Headline['metric']): [number, number] | null => {
     if (metric === 'cacheHit')
       return cell.cacheRatio !== undefined && auto.cacheRatio !== undefined
